@@ -40,7 +40,13 @@
 
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
     const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-    const finite = value => Number.isFinite(Number(value));
+    // Number(null) ve Number('') sıfır döndürür; fakat bunlar henüz piyasa
+    // verisi gelmediğini ifade eder. Null değeri sayısal kabul etmek ilk render'da
+    // toFixed çağrısının çökmesine neden olur.
+    const finite = value => value !== null
+        && value !== undefined
+        && value !== ''
+        && Number.isFinite(Number(value));
 
     class ChartManager {
         constructor(containerId) {
@@ -1093,8 +1099,9 @@
             document.getElementById('volume-24h').textContent = volume ? this.formatVolume(volume) : '—';
             document.getElementById('atr-value').textContent = this.indicators.atr ? this.formatPrice(this.indicators.atr) : '—';
 
-            const changeText = finite(change) ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '—';
-            const className = !finite(change) ? 'neutral' : change >= 0 ? 'positive' : 'negative';
+            const numericChange = finite(change) ? Number(change) : null;
+            const changeText = numericChange !== null ? `${numericChange >= 0 ? '+' : ''}${numericChange.toFixed(2)}%` : '—';
+            const className = numericChange === null ? 'neutral' : numericChange >= 0 ? 'positive' : 'negative';
             const tickerChange = document.getElementById('ticker-change');
             tickerChange.textContent = changeText;
             tickerChange.className = className;
