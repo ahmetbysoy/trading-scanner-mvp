@@ -1,6 +1,8 @@
 # Trading Scanner MVP — ters sinyal güvenlik düzeltmesi
 
-Bu repo, paylaşılan tarayıcı tabanlı scanner'daki **birkaç saniye içinde güçlü sinyalin tersine dönmesi** sorununu çözen `ConfluenceEngine` sürümünü içerir.
+**Canlı uygulama:** https://ahmetbysoy.github.io/trading-scanner-mvp/
+
+Bu repo, paylaşılan tarayıcı tabanlı scanner'daki **birkaç saniye içinde güçlü sinyalin tersine dönmesi** sorununu çözen `ConfluenceEngine` sürümünü ve GitHub Pages üzerinde çalışan scanner arayüzünü içerir.
 
 > Bu yazılım yatırım tavsiyesi vermez. Canlı hesapta kullanmadan önce paper trading ve geçmiş veri üzerinde test edilmelidir.
 
