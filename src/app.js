@@ -838,6 +838,10 @@
             });
             document.getElementById('settings-dialog').addEventListener('close', () => this.syncMobileTabs());
             document.getElementById('clear-signals-btn').addEventListener('click', () => this.clearSignals());
+            document.getElementById('active-contributors-btn').addEventListener('click', () => {
+                const active = this.signals.find(signal => signal.symbol === this.currentSymbol && signal.status === 'active');
+                if (active) this.openSignalDetail(active.id);
+            });
             document.getElementById('signals-body').addEventListener('click', event => {
                 const row = event.target.closest ? event.target.closest('[data-signal-id]') : null;
                 if (row) this.openSignalDetail(row.dataset.signalId);
@@ -1293,12 +1297,18 @@
             if (!signal) return;
             const diagnostics = signal.diagnostics || {};
             const conviction = diagnostics.conviction || {};
-            const familyCount = diagnostics.independentFamilies || new Set((signal.details || []).map(item => item.evidenceFamily)).size;
+            const contributors = signal.details || [];
+            const familyCount = diagnostics.independentFamilies || new Set(contributors.map(item => item.evidenceFamily)).size;
+            const contributionTotal = contributors.reduce((sum, detail) => {
+                const contribution = finite(detail.contributionScore) ? Number(detail.contributionScore) : Number(detail.score || 0);
+                return sum + contribution;
+            }, 0);
             document.getElementById('signal-detail-title').textContent = `${signal.direction.toUpperCase()} · ${signal.symbol.replace('USDT', '/USDT')} · Skor ${signal.score}`;
             document.getElementById('signal-detail-summary').innerHTML = `
                 <article><span>Durum</span><strong class="${signal.status === 'tp' ? 'positive' : signal.status === 'sl' ? 'negative' : ''}">${signal.status.toUpperCase()}</strong></article>
                 <article><span>Etkin / Ham Skor</span><strong>${signal.score} / ${signal.rawScore ?? signal.score}</strong></article>
                 <article><span>Bağımsız Teyit</span><strong>${signal.confirmations || 1} strateji · ${familyCount} aile</strong></article>
+                <article><span>Contributors / Katkı</span><strong>${contributors.length} strateji · ${contributionTotal.toFixed(2)} net</strong></article>
                 <article><span>Skor Farkı</span><strong>${Number(diagnostics.scoreLead || 0).toFixed(2)}</strong></article>
                 <article><span>Kararlılık</span><strong>${conviction.windows || 1} pencere · ${Math.round(conviction.elapsedMs || 0)} ms</strong></article>
                 <article><span>Rejim</span><strong>${this.escapeHtml(signal.regime || 'bilinmiyor')}</strong></article>
@@ -1306,20 +1316,30 @@
                 <article><span>TP / SL</span><strong>${this.formatPrice(signal.tp)} / ${this.formatPrice(signal.sl)}</strong></article>
             `;
 
-            const contributors = signal.details || [];
             document.getElementById('signal-contributors-body').innerHTML = contributors.length
-                ? contributors.map(detail => `
-                    <tr>
-                        <td>${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
-                        <td>${this.escapeHtml(detail.evidenceFamily || '—')}</td>
-                        <td>${this.escapeHtml(detail.reason || '—')}</td>
-                        <td>${Number(detail.baseScore ?? detail.score ?? 0).toFixed(2)}</td>
-                        <td>×${Number(detail.adaptiveWeight || 1).toFixed(2)}</td>
-                        <td>×${Number(detail.regimeFactor || 1).toFixed(2)}</td>
-                        <td>${Number(detail.score || 0).toFixed(2)}</td>
-                    </tr>
-                `).join('')
-                : '<tr><td colspan="7" class="table-empty">Eski sinyalde katkı detayı bulunmuyor.</td></tr>';
+                ? contributors.map(detail => {
+                    const contribution = finite(detail.contributionScore) ? Number(detail.contributionScore) : Number(detail.score || 0);
+                    const percent = finite(detail.contributionPercent)
+                        ? Number(detail.contributionPercent)
+                        : contributionTotal > 0 ? contribution / contributionTotal * 100 : 0;
+                    const capFactor = finite(detail.familyCapFactor) ? Number(detail.familyCapFactor) : 1;
+                    return `
+                        <tr>
+                            <td>${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
+                            <td>${this.escapeHtml(detail.evidenceFamily || '—')}</td>
+                            <td>${this.escapeHtml(detail.reason || '—')}</td>
+                            <td>${Number(detail.baseScore ?? detail.score ?? 0).toFixed(2)}</td>
+                            <td>×${Number(detail.adaptiveWeight || 1).toFixed(2)}</td>
+                            <td>×${Number(detail.regimeFactor || 1).toFixed(2)}</td>
+                            <td>${Number(detail.score || 0).toFixed(2)}</td>
+                            <td class="contribution-cell" title="Aile tavanı katsayısı: ×${capFactor.toFixed(3)}">
+                                <strong>${contribution.toFixed(2)} · %${percent.toFixed(1)}</strong>
+                                <span class="contribution-meter" aria-hidden="true"><i style="width:${clamp(percent, 0, 100)}%"></i></span>
+                            </td>
+                        </tr>
+                    `;
+                }).join('')
+                : '<tr><td colspan="8" class="table-empty">Eski sinyalde katkı detayı bulunmuyor.</td></tr>';
 
             const opponents = diagnostics.opposingDetails || [];
             document.getElementById('signal-opponents-body').innerHTML = opponents.length
@@ -1351,14 +1371,17 @@
             const card = document.getElementById('active-signal-card');
             const title = document.getElementById('active-signal-title');
             const detail = document.getElementById('active-signal-detail');
+            const contributorsButton = document.getElementById('active-contributors-btn');
             card.className = `active-signal-card ${active ? active.direction : 'empty'}`;
+            contributorsButton.hidden = !active;
             if (!active) {
                 title.textContent = 'Aktif sinyal yok';
                 detail.textContent = 'Yeni sinyal için en az iki bağımsız teyit bekleniyor.';
                 return;
             }
+            const contributorCount = (active.details || []).length || active.confirmations || 1;
             title.textContent = `${active.direction.toUpperCase()} · ${this.formatPrice(active.price)} · Skor ${active.score}`;
-            detail.textContent = `TP ${this.formatPrice(active.tp)} · SL ${this.formatPrice(active.sl)} · ${active.confirmations || 1} bağımsız teyit`;
+            detail.textContent = `TP ${this.formatPrice(active.tp)} · SL ${this.formatPrice(active.sl)} · ${contributorCount} strateji katkısı`;
         }
 
         updateMarketLabels() {
@@ -1721,7 +1744,7 @@
         try {
             window.app = new TradingScannerApp();
             if ('serviceWorker' in navigator && window.isSecureContext) {
-                navigator.serviceWorker.register('./sw.js?v=1').catch(error => {
+                navigator.serviceWorker.register('./sw.js?v=2').catch(error => {
                     console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
                 });
             }

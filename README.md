@@ -37,8 +37,9 @@ Scanner artık `src/adaptive-learning.js` üzerinden sınırlandırılmış bir 
 - Minimum iki farklı strateji ailesi gerekir ve tek ailenin toplam skora katkısı `%60` ile sınırlanır.
 - Ters sinyal için ek skor histerezisi ve `0.5 ATR` fiyat geçersizliği uygulanır.
 - Gerçek Wilder ADX, yön ve volatiliteyle rejim güveni hesaplanır; aile boost/cezaları en fazla `%8` ile sınırlıdır.
-- Sinyal satırına tıklanınca temel skor, öğrenme ağırlığı, rejim katsayısı, etkin katkı ve karşıt oylar görüntülenir.
+- Sinyal satırına veya aktif sinyaldeki **Katkıları canlı gör** düğmesine basılınca temel skor, öğrenme ağırlığı, rejim katsayısı, aile tavanı sonrası net katkı, katkı yüzdesi ve karşıt oylar görüntülenir.
 - Strateji ikililerinin ortak sonuçları gelecekteki kombinasyon optimizasyonu için kaydedilir.
+- Sürekli optimizasyon önerileri ve güvenli uygulama sırası [`docs/continuous-optimization-roadmap.md`](docs/continuous-optimization-roadmap.md) belgesinde listelenir.
 - Veriler tarayıcıdaki IndexedDB'de saklanır ve panelden JSON olarak dışa aktarılabilir.
 
 Öğrenme Merkezi üç çalışma modu sunar:
@@ -152,11 +153,25 @@ Motor zaten teklifleri sembol bazında ayırır; bu çağrı ayrıca bekleyen za
 
 ## Test
 
-Node.js 18 veya üzeri ile:
+Node.js unit/smoke testleri:
 
 ```bash
 npm test
 ```
+
+Gerçek Chromium üzerinde masaüstü ve mobil Playwright testleri:
+
+```bash
+npm run test:e2e
+```
+
+Bütün doğrulamalar:
+
+```bash
+npm run test:all
+```
+
+Playwright paketiyle birlikte gelen tarayıcı indirmesi doğrudan erişilebilir değilse test hazırlama betiği `@sparticuz/chromium` içindeki eşleşen Chromium binary'sini otomatik hazırlar.
 
 Testler şu senaryoları kapsar:
 
@@ -167,3 +182,6 @@ Testler şu senaryoları kapsar:
 - Kilit sonrasında iki bağımsız teyit ve daha yüksek skor aranır.
 - BUY 5 / SELL 4 gibi çekişmeli durum sinyal sayılmaz.
 - BTC teklifleri ETH skoruna karışmaz.
+- Contributor net katkısı ve yüzdesi aile tavanı sonrasında doğru dağıtılır.
+- Masaüstü dashboard, ayarlar, tema, chart/heatmap, start/stop ve öğrenme dışa aktarımı gerçek Chromium'da çalışır.
+- Mobil alt navigasyon, görünüm kalıcılığı, tam ekran dialoglar, sinyal rozeti ve dokunma hedefleri gerçek mobil viewport'ta çalışır.

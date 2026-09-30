@@ -347,6 +347,11 @@ tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, transparent);
 .signal-detail-summary strong { font-size: 10px; }
 .detail-section-title { margin: 18px 0 8px; color: var(--primary); font-size: 10px; }
 .detail-table-wrap { max-height: 230px; border: 1px solid var(--border); border-radius: 10px; }
+.contribution-cell { min-width: 112px; }
+.contribution-cell strong { display: block; margin-bottom: 5px; color: var(--primary); font-size: 9px; }
+.contribution-meter { width: 100%; height: 4px; display: block; overflow: hidden; border-radius: 999px; background: var(--border); }
+.contribution-meter i { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, var(--positive), var(--primary)); }
+#active-contributors-btn { width: max-content; margin-top: 3px; color: var(--primary); border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
 .settings-dialog form { display: flex; max-height: inherit; flex-direction: column; }
 .dialog-heading { padding: 16px 18px; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .dialog-heading .icon-btn { font-size: 20px; }
@@ -544,6 +549,7 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .signals-panel > .panel-heading h2 { font-size: 17px; }
     .signals-panel > .panel-heading .btn { min-height: 44px; }
     .active-signal-card { margin: 10px; padding: 12px; border-radius: 14px; }
+    #active-contributors-btn { min-height: 44px; }
     .table-wrap { min-height: 280px; }
     th, td { padding: 11px 9px; }
     .stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 10px; }

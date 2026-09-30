@@ -16,11 +16,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=5">
+    <link rel="stylesheet" href="./styles.css?v=6">
     <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script defer src="./src/adaptive-learning.js?v=5"></script>
-    <script defer src="./src/confluence-engine.js?v=5"></script>
-    <script defer src="./src/app.js?v=5"></script>
+    <script defer src="./src/adaptive-learning.js?v=6"></script>
+    <script defer src="./src/confluence-engine.js?v=6"></script>
+    <script defer src="./src/app.js?v=6"></script>
 </head>
 <body data-mobile-view="home">
     <noscript>Bu uygulamayı kullanmak için JavaScript etkin olmalıdır.</noscript>
@@ -150,6 +150,7 @@
                     <span class="active-label">AKTİF POZİSYON KİLİDİ</span>
                     <strong id="active-signal-title">Aktif sinyal yok</strong>
                     <span id="active-signal-detail">Yeni sinyal için en az iki bağımsız teyit bekleniyor.</span>
+                    <button id="active-contributors-btn" class="btn btn-small btn-ghost" type="button" hidden>Katkıları canlı gör</button>
                 </div>
 
                 <div class="table-wrap">
@@ -370,7 +371,7 @@
             <h3 class="detail-section-title">Katkıda Bulunan Stratejiler</h3>
             <div class="learning-table-wrap detail-table-wrap">
                 <table class="learning-table">
-                    <thead><tr><th>Strateji</th><th>Aile</th><th>Sebep</th><th>Temel</th><th>Öğrenme</th><th>Rejim</th><th>Etkin</th></tr></thead>
+                    <thead><tr><th>Strateji</th><th>Aile</th><th>Sebep</th><th>Temel</th><th>Öğrenme</th><th>Rejim</th><th>Etkin</th><th>Net Katkı</th></tr></thead>
                     <tbody id="signal-contributors-body"></tbody>
                 </table>
             </div>

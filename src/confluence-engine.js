@@ -302,6 +302,10 @@
             const now = this._now();
             const rawScore = this._sumScores(proposals);
             const totalScore = Number(diagnostics.candidateScore) || rawScore;
+            const contributionBreakdown = this._allocateContributions(
+                proposals,
+                this._getSafetySettings().maxFamilyContributionRatio
+            );
             const strategyNames = proposals.map(proposal => {
                 const strategy = this.bot.strategies && this.bot.strategies[proposal.strategy];
                 return strategy && strategy.displayName ? strategy.displayName : proposal.strategy;
@@ -321,7 +325,7 @@
                 rawScore: Math.round(rawScore * 100) / 100,
                 confirmations: uniqueStrategyNames.length,
                 reason: uniqueStrategyNames.join(', '),
-                details: proposals.map(proposal => ({
+                details: proposals.map((proposal, index) => ({
                     strategy: proposal.strategy,
                     reason: proposal.reason,
                     score: proposal.score,
@@ -331,9 +335,16 @@
                     context: proposal.context,
                     regime: proposal.regime,
                     family: proposal.family,
-                    evidenceFamily: proposal.evidenceFamily
+                    evidenceFamily: proposal.evidenceFamily,
+                    contributionScore: contributionBreakdown.contributions[index].score,
+                    contributionPercent: contributionBreakdown.contributions[index].percent,
+                    familyCapFactor: contributionBreakdown.contributions[index].familyCapFactor
                 })),
-                diagnostics,
+                diagnostics: {
+                    ...diagnostics,
+                    contributionTotal: contributionBreakdown.total,
+                    contributorCount: proposals.length
+                },
                 status: 'active',
                 note: ''
             };
@@ -408,6 +419,42 @@
                 rawScore: Math.round(rawScore * 100) / 100,
                 cappedScore: Math.round(cappedScore * 100) / 100,
                 familyScores
+            };
+        }
+
+        _allocateContributions(proposals, maxFamilyRatio) {
+            const rawScore = this._sumScores(proposals);
+            if (!rawScore) {
+                return {
+                    total: 0,
+                    contributions: proposals.map(() => ({ score: 0, percent: 0, familyCapFactor: 1 }))
+                };
+            }
+
+            const ratio = Math.min(1, Math.max(0.25, Number(maxFamilyRatio) || 1));
+            const familyCap = rawScore * ratio;
+            const familyScores = proposals.reduce((scores, proposal) => {
+                const family = proposal.evidenceFamily || 'other';
+                scores[family] = (scores[family] || 0) + proposal.score;
+                return scores;
+            }, {});
+            const unrounded = proposals.map(proposal => {
+                const family = proposal.evidenceFamily || 'other';
+                const familyScore = familyScores[family] || proposal.score;
+                const familyCapFactor = Math.min(1, familyCap / familyScore);
+                return {
+                    score: proposal.score * familyCapFactor,
+                    familyCapFactor
+                };
+            });
+            const total = unrounded.reduce((sum, item) => sum + item.score, 0);
+            return {
+                total: Math.round(total * 100) / 100,
+                contributions: unrounded.map(item => ({
+                    score: Math.round(item.score * 100) / 100,
+                    percent: total ? Math.round((item.score / total) * 1000) / 10 : 0,
+                    familyCapFactor: Math.round(item.familyCapFactor * 1000) / 1000
+                }))
             };
         }
 

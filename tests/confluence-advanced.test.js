@@ -101,6 +101,16 @@ test('iki farklı strateji ailesi sinyal üretebilir ve aile katkısı sınırla
     assert.equal(result.signal.rawScore, 12);
     assert.equal(result.signal.score, 9.2);
     assert.equal(result.signal.diagnostics.independentFamilies, 2);
+    assert.equal(result.signal.diagnostics.contributionTotal, 9.2);
+    assert.deepEqual(
+        result.signal.details.map(detail => detail.contributionScore),
+        [5.76, 1.44, 2]
+    );
+    assert.deepEqual(
+        result.signal.details.map(detail => detail.contributionPercent),
+        [62.6, 15.7, 21.7]
+    );
+    assert.equal(result.signal.details[0].familyCapFactor, 0.72);
 });
 
 test('conviction sinyalden önce farklı zaman pencerelerinde kalıcılık ister', () => {

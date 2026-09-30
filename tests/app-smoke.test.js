@@ -192,6 +192,8 @@ test('uygulama null ticker verisiyle hatasız açılır ve adaptif paneli oluşt
     }];
     context.app.openSignalDetail('sig-detail');
     assert.match(context.elements.get('signal-contributors-body').innerHTML, /Hacimli kırılım/);
+    assert.match(context.elements.get('signal-contributors-body').innerHTML, /4\.62 · %100\.0/);
+    assert.match(context.elements.get('signal-detail-summary').innerHTML, /Contributors/);
     assert.equal(context.elements.get('signal-detail-dialog').open, true);
 });
 

@@ -4,9 +4,15 @@
   "private": true,
   "description": "Trading scanner sinyal güvenliği düzeltmesi",
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "node scripts/prepare-playwright.cjs && playwright test",
+    "test:all": "npm test && npm run test:e2e"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@sparticuz/chromium": "^153.0.0"
   }
 }
