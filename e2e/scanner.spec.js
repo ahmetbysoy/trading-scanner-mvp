@@ -47,11 +47,16 @@ async function preparePage(page) {
     }));
     await page.route('https://fonts.googleapis.com/**', route => route.abort());
     await page.route('https://fonts.gstatic.com/**', route => route.abort());
-    await page.route('https://fapi.binance.com/**', route => route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(candleRows())
-    }));
+    await page.route('https://fapi.binance.com/**', route => {
+        const ticker = route.request().url().includes('/ticker/24hr');
+        return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(ticker
+                ? { s: 'BTCUSDT', c: '64777.50', P: '1.25', q: '98765432' }
+                : candleRows())
+        });
+    });
     await page.addInitScript(() => {
         class FakeWebSocket {
             static CONNECTING = 0;
@@ -201,6 +206,8 @@ test.describe('masaüstü uygulama akışı', () => {
         await expect(page.locator('#connection-text')).toHaveText('CANLI');
         await expect(page.locator('#chart-empty')).toHaveClass(/hidden/);
         await expect(page.locator('#start-btn')).toBeDisabled();
+        await expect(page.locator('#start-btn')).toHaveText('Çalışıyor');
+        await expect(page.locator('#ticker-price')).toContainText('64,777.50');
         await expect(page.locator('#stop-btn')).toBeEnabled();
 
         await page.evaluate(() => {
@@ -226,6 +233,7 @@ test.describe('masaüstü uygulama akışı', () => {
         await page.locator('#stop-btn').click();
         await expect(page.locator('#connection-text')).toHaveText('DURDURULDU');
         await expect(page.locator('#start-btn')).toBeEnabled();
+        await expect(page.locator('#start-btn')).toHaveText('Sistemi Başlat');
     });
 
     test('contributors modalı net katkı, yüzde ve aile tavanını gösterir', async ({ page }) => {
@@ -267,6 +275,10 @@ test.describe('mobil uygulama akışı', () => {
         await expect(page.locator('.control-panel')).toBeVisible();
         await expect(page.locator('.market-panel')).toBeHidden();
         await expect(page.locator('#mobile-page-title')).toHaveText('Ana Sayfa');
+        const tabbarHeight = await page.locator('#mobile-tabbar').evaluate(node => node.getBoundingClientRect().height);
+        expect(tabbarHeight).toBe(70);
+        const suffixHeight = await page.locator('.symbol-field b').evaluate(node => node.getBoundingClientRect().height);
+        expect(suffixHeight).toBeLessThan(24);
         await page.screenshot({ path: 'test-results/audit-01-home-top.png' });
         await page.locator('.app-shell').evaluate(node => { node.scrollTop = node.scrollHeight; });
         await page.screenshot({ path: 'test-results/audit-02-home-bottom.png' });
@@ -282,6 +294,7 @@ test.describe('mobil uygulama akışı', () => {
         await page.locator('#mobile-tabbar [data-mobile-view="signals"]').click();
         await expect(page.locator('.signals-panel')).toBeVisible();
         await expect(page.locator('#mobile-page-title')).toHaveText('Sinyaller');
+        await expect(page.locator('#mobile-signal-badge')).toBeHidden();
         await page.screenshot({ path: 'test-results/audit-05-signals-empty.png' });
 
         await page.locator('#mobile-tabbar [data-mobile-view="learning"]').click();

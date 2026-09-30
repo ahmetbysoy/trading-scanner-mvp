@@ -900,7 +900,9 @@
         async start() {
             if (this.isRunning) return;
             this.isRunning = true;
-            document.getElementById('start-btn').disabled = true;
+            const startButton = document.getElementById('start-btn');
+            startButton.disabled = true;
+            startButton.textContent = 'Başlatılıyor…';
             document.getElementById('stop-btn').disabled = false;
             this.updateConnection(false, 'BAĞLANIYOR');
             this.notify('Sistem başlatılıyor; öğrenme durumu ve piyasa verisi yükleniyor.', 'success');
@@ -916,7 +918,9 @@
         stop(options = {}) {
             if (!this.isRunning && !this.socket) return;
             this.isRunning = false;
-            document.getElementById('start-btn').disabled = false;
+            const startButton = document.getElementById('start-btn');
+            startButton.disabled = false;
+            startButton.textContent = 'Sistemi Başlat';
             document.getElementById('stop-btn').disabled = true;
             window.clearInterval(this.renderTimer);
             window.clearInterval(this.analysisTimer);
@@ -960,7 +964,11 @@
         async fetchInitialData() {
             try {
                 const endpoint = `https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(this.currentSymbol)}&interval=${encodeURIComponent(this.currentTimeframe)}&limit=500`;
-                const response = await fetch(endpoint);
+                const tickerEndpoint = `https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${encodeURIComponent(this.currentSymbol)}`;
+                const [response, tickerResponse] = await Promise.all([
+                    fetch(endpoint),
+                    fetch(tickerEndpoint).catch(() => null)
+                ]);
                 if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
                 const rows = await response.json();
                 if (!Array.isArray(rows)) throw new Error('Beklenmeyen Binance yanıtı');
@@ -975,7 +983,29 @@
                     volume: Number(row[5]),
                     closed: Number(row[6]) < now
                 }));
+                let tickerData = null;
+                if (tickerResponse && tickerResponse.ok) {
+                    try {
+                        const payload = await tickerResponse.json();
+                        if (payload && !Array.isArray(payload)) tickerData = payload;
+                    } catch (error) {
+                        console.warn('24 saat ticker verisi okunamadı:', error);
+                    }
+                }
+                const latestCandle = this.candles.at(-1);
+                if (tickerData && finite(tickerData.c)) {
+                    this.marketData.price = Number(tickerData.c);
+                    this.marketData.change24h = finite(tickerData.P) ? Number(tickerData.P) : null;
+                    this.marketData.volume24h = finite(tickerData.q) ? Number(tickerData.q) : null;
+                } else if (latestCandle && finite(latestCandle.close)) {
+                    // WebSocket ticker mesajından önce fiyat kartının boş kalmasını önler.
+                    this.marketData.price = Number(latestCandle.close);
+                }
+                if (this.currentSymbol === 'BTCUSDT' && finite(this.marketData.price)) {
+                    this.marketData.btcPrice = this.marketData.price;
+                }
                 this.calculateIndicators();
+                this.renderPrice();
                 this.chartManager.setData(this.candles);
                 this.chartManager.setSignalMarkers(this.signals.filter(signal => signal.symbol === this.currentSymbol));
                 document.getElementById('chart-empty').classList.toggle('hidden', this.candles.length > 0);
@@ -999,6 +1029,7 @@
             socket.addEventListener('open', () => {
                 if (socket !== this.socket) return;
                 this.reconnectAttempts = 0;
+                document.getElementById('start-btn').textContent = 'Çalışıyor';
                 this.updateConnection(true, 'CANLI');
             });
             socket.addEventListener('message', event => {
@@ -1772,7 +1803,7 @@
         try {
             window.app = new TradingScannerApp();
             if ('serviceWorker' in navigator && window.isSecureContext) {
-                navigator.serviceWorker.register('./sw.js?v=3').catch(error => {
+                navigator.serviceWorker.register('./sw.js?v=4').catch(error => {
                     console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
                 });
             }
