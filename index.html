@@ -16,11 +16,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=6">
+    <link rel="stylesheet" href="./styles.css?v=7">
     <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script defer src="./src/adaptive-learning.js?v=6"></script>
-    <script defer src="./src/confluence-engine.js?v=6"></script>
-    <script defer src="./src/app.js?v=6"></script>
+    <script defer src="./src/adaptive-learning.js?v=7"></script>
+    <script defer src="./src/confluence-engine.js?v=7"></script>
+    <script defer src="./src/app.js?v=7"></script>
 </head>
 <body data-mobile-view="home">
     <noscript>Bu uygulamayı kullanmak için JavaScript etkin olmalıdır.</noscript>
@@ -279,8 +279,16 @@
                 <button id="close-settings-btn" class="icon-btn" value="cancel" type="submit" aria-label="Ayarları kapat">×</button>
             </div>
 
+            <nav class="settings-section-nav" aria-label="Ayar bölümleri">
+                <button type="button" data-settings-target="settings-basic">Temel</button>
+                <button type="button" data-settings-target="settings-safety">Güvenlik</button>
+                <button type="button" data-settings-target="settings-learning">Öğrenme</button>
+                <button type="button" data-settings-target="settings-cooldowns">Cooldown</button>
+                <button type="button" data-settings-target="settings-strategies">Stratejiler</button>
+            </nav>
+
             <div class="dialog-body">
-                <fieldset>
+                <fieldset id="settings-basic">
                     <legend>Temel Parametreler</legend>
                     <div class="settings-grid">
                         <label class="field"><span>Minimum Uyum Skoru</span><input id="setting-threshold" type="number" min="1" max="50" step="1"></label>
@@ -292,7 +300,7 @@
                     </div>
                 </fieldset>
 
-                <fieldset class="safety-fieldset">
+                <fieldset id="settings-safety" class="safety-fieldset">
                     <legend>Sinyal Güvenliği</legend>
                     <div class="settings-grid">
                         <label class="field"><span>Değerlendirme Penceresi (ms)</span><input id="setting-evaluation-delay" type="number" min="100" max="10000" step="100"></label>
@@ -318,7 +326,7 @@
                     </label>
                 </fieldset>
 
-                <fieldset class="learning-fieldset">
+                <fieldset id="settings-learning" class="learning-fieldset">
                     <legend>Adaptif Öğrenme</legend>
                     <div class="settings-grid">
                         <label class="field"><span>Minimum Örnek</span><input id="setting-learning-min-samples" type="number" min="5" max="500" step="1"></label>
@@ -333,7 +341,7 @@
                     </label>
                 </fieldset>
 
-                <fieldset>
+                <fieldset id="settings-cooldowns">
                     <legend>Cooldown</legend>
                     <div class="settings-grid">
                         <label class="field"><span>Genel Sinyal (ms)</span><input id="setting-signal-cooldown" type="number" min="0" max="3600000" step="1000"></label>
@@ -342,14 +350,14 @@
                     </div>
                 </fieldset>
 
-                <fieldset>
+                <fieldset id="settings-strategies">
                     <legend>Aktif Stratejiler</legend>
                     <div id="strategy-toggles" class="strategy-grid"></div>
                 </fieldset>
             </div>
 
             <div class="dialog-footer">
-                <button id="reset-settings-btn" class="btn btn-danger" type="button">Varsayılana Dön</button>
+                <button id="reset-settings-btn" class="btn btn-danger" type="button"><span class="desktop-reset-label">Varsayılana Dön</span><span class="mobile-reset-label">Sıfırla</span></button>
                 <div class="dialog-footer-right">
                     <button class="btn btn-ghost" value="cancel" type="submit">Vazgeç</button>
                     <button id="save-settings-btn" class="btn btn-primary" value="default" type="submit">Kaydet</button>

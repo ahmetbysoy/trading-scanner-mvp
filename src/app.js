@@ -872,6 +872,9 @@
                 document.getElementById('settings-dialog').close();
             });
             document.getElementById('reset-settings-btn').addEventListener('click', () => this.resetSettings());
+            document.querySelectorAll('[data-settings-target]').forEach(button => {
+                button.addEventListener('click', () => this.scrollSettingsTo(button.dataset.settingsTarget));
+            });
 
             window.addEventListener('online', () => {
                 if (this.isRunning && (!this.socket || this.socket.readyState > 1)) this.connectWebSocket(true);
@@ -1272,6 +1275,8 @@
 
         renderSignals() {
             const body = document.getElementById('signals-body');
+            const panel = document.querySelector('.signals-panel');
+            if (panel) panel.classList.toggle('has-history', this.signals.length > 0);
             const activeCount = this.signals.filter(signal => signal.status === 'active').length;
             const mobileBadge = document.getElementById('mobile-signal-badge');
             mobileBadge.textContent = activeCount > 9 ? '9+' : String(activeCount);
@@ -1325,14 +1330,14 @@
                     const capFactor = finite(detail.familyCapFactor) ? Number(detail.familyCapFactor) : 1;
                     return `
                         <tr>
-                            <td>${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
-                            <td>${this.escapeHtml(detail.evidenceFamily || '—')}</td>
-                            <td>${this.escapeHtml(detail.reason || '—')}</td>
-                            <td>${Number(detail.baseScore ?? detail.score ?? 0).toFixed(2)}</td>
-                            <td>×${Number(detail.adaptiveWeight || 1).toFixed(2)}</td>
-                            <td>×${Number(detail.regimeFactor || 1).toFixed(2)}</td>
-                            <td>${Number(detail.score || 0).toFixed(2)}</td>
-                            <td class="contribution-cell" title="Aile tavanı katsayısı: ×${capFactor.toFixed(3)}">
+                            <td data-label="Strateji">${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
+                            <td data-label="Aile">${this.escapeHtml(detail.evidenceFamily || '—')}</td>
+                            <td data-label="Sebep">${this.escapeHtml(detail.reason || '—')}</td>
+                            <td data-label="Temel">${Number(detail.baseScore ?? detail.score ?? 0).toFixed(2)}</td>
+                            <td data-label="Öğrenme">×${Number(detail.adaptiveWeight || 1).toFixed(2)}</td>
+                            <td data-label="Rejim">×${Number(detail.regimeFactor || 1).toFixed(2)}</td>
+                            <td data-label="Etkin">${Number(detail.score || 0).toFixed(2)}</td>
+                            <td data-label="Net Katkı" class="contribution-cell" title="Aile tavanı katsayısı: ×${capFactor.toFixed(3)}">
                                 <strong>${contribution.toFixed(2)} · %${percent.toFixed(1)}</strong>
                                 <span class="contribution-meter" aria-hidden="true"><i style="width:${clamp(percent, 0, 100)}%"></i></span>
                             </td>
@@ -1345,11 +1350,11 @@
             document.getElementById('signal-opponents-body').innerHTML = opponents.length
                 ? opponents.map(detail => `
                     <tr>
-                        <td>${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
-                        <td>${String(detail.direction || '').toUpperCase()}</td>
-                        <td>${this.escapeHtml(detail.evidenceFamily || '—')}</td>
-                        <td>${this.escapeHtml(detail.reason || '—')}</td>
-                        <td>${Number(detail.score || 0).toFixed(2)}</td>
+                        <td data-label="Strateji">${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
+                        <td data-label="Yön">${String(detail.direction || '').toUpperCase()}</td>
+                        <td data-label="Aile">${this.escapeHtml(detail.evidenceFamily || '—')}</td>
+                        <td data-label="Sebep">${this.escapeHtml(detail.reason || '—')}</td>
+                        <td data-label="Etkin Skor">${Number(detail.score || 0).toFixed(2)}</td>
                     </tr>
                 `).join('')
                 : '<tr><td colspan="5" class="table-empty">Karşıt oy yok.</td></tr>';
@@ -1450,7 +1455,30 @@
 
         openSettings() {
             this.fillSettingsForm();
-            document.getElementById('settings-dialog').showModal();
+            const dialog = document.getElementById('settings-dialog');
+            dialog.showModal();
+            requestAnimationFrame(() => {
+                const body = dialog.querySelector('.dialog-body');
+                if (body) body.scrollTop = 0;
+                this.syncSettingsSectionNav('settings-basic');
+            });
+        }
+
+        scrollSettingsTo(targetId) {
+            const dialog = document.getElementById('settings-dialog');
+            const body = dialog.querySelector('.dialog-body');
+            const target = document.getElementById(targetId);
+            if (!body || !target) return;
+            body.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior: 'smooth' });
+            this.syncSettingsSectionNav(targetId);
+        }
+
+        syncSettingsSectionNav(targetId) {
+            document.querySelectorAll('[data-settings-target]').forEach(button => {
+                const active = button.dataset.settingsTarget === targetId;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-current', active ? 'true' : 'false');
+            });
         }
 
         fillSettingsForm() {
@@ -1615,15 +1643,15 @@
                 const cooldown = row.cooldown === null ? 'Mum bazlı' : `${(row.cooldown / 1000).toFixed(1)} sn`;
                 return `
                     <tr>
-                        <td>${this.escapeHtml(row.displayName)}</td>
-                        <td><span class="role-pill ${row.active ? 'live' : 'shadow'}">${row.active ? 'LIVE + SHADOW' : 'SHADOW'}</span></td>
-                        <td>${row.liveCount}</td>
-                        <td>${row.shadowCount}</td>
-                        <td>${row.winRate === null ? '—' : `${(row.winRate * 100).toFixed(1)}%`}</td>
-                        <td class="${row.averageR > 0 ? 'positive' : row.averageR < 0 ? 'negative' : ''}">${row.effectiveCount ? row.averageR.toFixed(2) : '—'}</td>
-                        <td class="${row.ewmaR > 0 ? 'positive' : row.ewmaR < 0 ? 'negative' : ''}">${row.effectiveCount ? row.ewmaR.toFixed(2) : '—'}</td>
-                        <td><span class="weight-pill ${weightClass}">×${row.weight.toFixed(2)}</span></td>
-                        <td>${cooldown}</td>
+                        <td data-label="Strateji">${this.escapeHtml(row.displayName)}</td>
+                        <td data-label="Rol"><span class="role-pill ${row.active ? 'live' : 'shadow'}">${row.active ? 'LIVE + SHADOW' : 'SHADOW'}</span></td>
+                        <td data-label="Live">${row.liveCount}</td>
+                        <td data-label="Shadow">${row.shadowCount}</td>
+                        <td data-label="Bayes Win%">${row.winRate === null ? '—' : `${(row.winRate * 100).toFixed(1)}%`}</td>
+                        <td data-label="Ort. R" class="${row.averageR > 0 ? 'positive' : row.averageR < 0 ? 'negative' : ''}">${row.effectiveCount ? row.averageR.toFixed(2) : '—'}</td>
+                        <td data-label="EWMA R" class="${row.ewmaR > 0 ? 'positive' : row.ewmaR < 0 ? 'negative' : ''}">${row.effectiveCount ? row.ewmaR.toFixed(2) : '—'}</td>
+                        <td data-label="Ağırlık"><span class="weight-pill ${weightClass}">×${row.weight.toFixed(2)}</span></td>
+                        <td data-label="Cooldown">${cooldown}</td>
                     </tr>
                 `;
             }).join('');
@@ -1744,7 +1772,7 @@
         try {
             window.app = new TradingScannerApp();
             if ('serviceWorker' in navigator && window.isSecureContext) {
-                navigator.serviceWorker.register('./sw.js?v=2').catch(error => {
+                navigator.serviceWorker.register('./sw.js?v=3').catch(error => {
                     console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
                 });
             }

@@ -13,8 +13,9 @@ Bu repo, paylaşılan tarayıcı tabanlı scanner'daki **birkaç saniye içinde 
 - **Ana Sayfa:** piyasa seçimi, sistem yaşam döngüsü, canlı metrikler ve güvenlik özeti
 - **Piyasa:** tam ekran grafik / emir defteri ısı haritası ve dokunmatik zoom
 - **Sinyaller:** aktif pozisyon kilidi, geçmiş, sonuçlar ve katkı detayı
-- **Öğrenme:** live/shadow ölçümleri, rejim ve adaptif ağırlıklar
-- **Ayarlar:** mobilde tam ekran güvenlik, cooldown, öğrenme ve strateji ayarları
+- **Öğrenme:** live/shadow ölçümleri, rejim ve adaptif ağırlıklar; telefonda yatay tablo yerine okunabilir strateji kartları
+- **Ayarlar:** mobilde tam ekran güvenlik, cooldown, öğrenme ve strateji ayarları; hızlı bölüm navigasyonu
+- **Sinyal detayı:** yatay kaydırma gerektirmeyen contributor kartları, net katkı ve yüzdelik dağılım
 
 Üst canlı ticker ve alt navigasyon sabittir; iOS/Android güvenli alanları hesaba katılır. Son mobil ekran ile grafik/heatmap seçimi cihazda saklanır. `manifest.webmanifest` ve `sw.js` sayesinde desteklenen tarayıcılarda ana ekrana bağımsız uygulama olarak kurulabilir. Masaüstü düzeni 720px üstünde korunur.
 

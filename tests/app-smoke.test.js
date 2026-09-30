@@ -47,6 +47,7 @@ function createElement(id = '') {
             (listeners.close || []).forEach(handler => handler({ currentTarget: this, target: this }));
         },
         scrollTo(options) { this.scrollTop = options?.top ?? 0; },
+        querySelector() { return null; },
         getContext() {
             return {
                 clearRect() {}, setTransform() {}, fillRect() {}, fillText() {},

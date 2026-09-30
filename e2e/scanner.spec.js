@@ -267,19 +267,31 @@ test.describe('mobil uygulama akışı', () => {
         await expect(page.locator('.control-panel')).toBeVisible();
         await expect(page.locator('.market-panel')).toBeHidden();
         await expect(page.locator('#mobile-page-title')).toHaveText('Ana Sayfa');
+        await page.screenshot({ path: 'test-results/audit-01-home-top.png' });
+        await page.locator('.app-shell').evaluate(node => { node.scrollTop = node.scrollHeight; });
+        await page.screenshot({ path: 'test-results/audit-02-home-bottom.png' });
 
-        await page.locator('[data-mobile-view="market"]').click();
+        await page.locator('#mobile-tabbar [data-mobile-view="market"]').click();
         await expect(page.locator('.market-panel')).toBeVisible();
         await expect(page.locator('.control-panel')).toBeHidden();
         await expect(page.locator('#mobile-page-title')).toHaveText('Piyasa');
+        await page.screenshot({ path: 'test-results/audit-03-market-chart.png' });
+        await page.locator('#heatmap-view-btn').click();
+        await page.screenshot({ path: 'test-results/audit-04-market-heatmap.png' });
 
-        await page.locator('[data-mobile-view="signals"]').click();
+        await page.locator('#mobile-tabbar [data-mobile-view="signals"]').click();
         await expect(page.locator('.signals-panel')).toBeVisible();
         await expect(page.locator('#mobile-page-title')).toHaveText('Sinyaller');
+        await page.screenshot({ path: 'test-results/audit-05-signals-empty.png' });
 
-        await page.locator('[data-mobile-view="learning"]').click();
+        await page.locator('#mobile-tabbar [data-mobile-view="learning"]').click();
         await expect(page.locator('.learning-panel')).toBeVisible();
         await expect(page.locator('#mobile-page-title')).toHaveText('Öğrenme');
+        await page.screenshot({ path: 'test-results/audit-06-learning-top.png' });
+        await page.locator('.app-shell').evaluate(node => { node.scrollTop = node.scrollHeight; });
+        await page.screenshot({ path: 'test-results/audit-07-learning-bottom.png' });
+        const shellOverflow = await page.locator('.app-shell').evaluate(node => node.scrollWidth - node.clientWidth);
+        expect(shellOverflow).toBeLessThanOrEqual(1);
 
         await page.reload();
         await page.waitForFunction(() => Boolean(window.app));
@@ -295,6 +307,9 @@ test.describe('mobil uygulama akışı', () => {
         await page.locator('#active-contributors-btn').click();
         await expect(page.locator('#signal-detail-dialog')).toBeVisible();
         await expect(page.locator('#signal-contributors-body')).toContainText('4.80 · %60.0');
+        await page.screenshot({ path: 'test-results/audit-08-contributors-modal.png' });
+        const contributorOverflow = await page.locator('#signal-detail-dialog .dialog-body').evaluate(node => node.scrollWidth - node.clientWidth);
+        expect(contributorOverflow).toBeLessThanOrEqual(1);
         const detailBox = await page.locator('#signal-detail-dialog').boundingBox();
         expect(detailBox.width).toBe(390);
         expect(detailBox.height).toBe(844);
@@ -302,6 +317,18 @@ test.describe('mobil uygulama akışı', () => {
 
         await page.locator('#mobile-settings-tab').click();
         await expect(page.locator('#settings-dialog')).toBeVisible();
+        await page.screenshot({ path: 'test-results/audit-09-settings-top.png' });
+        const settingsBody = page.locator('#settings-dialog .dialog-body');
+        await page.locator('[data-settings-target="settings-safety"]').click();
+        await expect(page.locator('[data-settings-target="settings-safety"]')).toHaveClass(/active/);
+        await expect(page.locator('#settings-safety')).toBeInViewport();
+        await page.screenshot({ path: 'test-results/audit-10-settings-middle.png' });
+        await page.locator('[data-settings-target="settings-strategies"]').click();
+        await expect(page.locator('[data-settings-target="settings-strategies"]')).toHaveClass(/active/);
+        await expect(page.locator('#settings-strategies')).toBeInViewport();
+        await page.screenshot({ path: 'test-results/audit-11-settings-bottom.png' });
+        const settingsOverflow = await settingsBody.evaluate(node => node.scrollWidth - node.clientWidth);
+        expect(settingsOverflow).toBeLessThanOrEqual(1);
         const settingsBox = await page.locator('#settings-dialog').boundingBox();
         expect(settingsBox.width).toBe(390);
         expect(settingsBox.height).toBe(844);
@@ -311,5 +338,23 @@ test.describe('mobil uygulama akışı', () => {
         const tabHeight = await page.locator('[data-mobile-view="home"]').evaluate(node => node.getBoundingClientRect().height);
         expect(tabHeight).toBeGreaterThanOrEqual(54);
         await page.screenshot({ path: 'test-results/mobile-app.png', fullPage: true });
+    });
+});
+
+test.describe('dar mobil görünüm', () => {
+    test.use({ viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true });
+
+    test('320px ekranda bütün sekmeler ve ayarlar yatay taşma üretmez', async ({ page }) => {
+        await preparePage(page);
+        for (const view of ['home', 'market', 'signals', 'learning']) {
+            await page.locator(`#mobile-tabbar [data-mobile-view="${view}"]`).click();
+            const overflow = await page.locator('.app-shell').evaluate(node => node.scrollWidth - node.clientWidth);
+            expect(overflow, `${view} yatay taşma`).toBeLessThanOrEqual(1);
+        }
+        await page.locator('#mobile-settings-tab').click();
+        await expect(page.locator('.settings-section-nav')).toBeVisible();
+        const dialogOverflow = await page.locator('#settings-dialog').evaluate(node => node.scrollWidth - node.clientWidth);
+        expect(dialogOverflow).toBeLessThanOrEqual(1);
+        await page.screenshot({ path: 'test-results/audit-12-settings-320px.png' });
     });
 });
