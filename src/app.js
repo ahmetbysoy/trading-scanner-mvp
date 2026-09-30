@@ -282,23 +282,41 @@
     }
 
     class Strategy {
-        constructor(bot, name) {
+        constructor(bot, name, family = 'candle') {
             this.bot = bot;
             this.name = name;
+            this.family = family;
             this.displayName = STRATEGY_LABELS[name] || name;
             this.lastProposalTime = Object.create(null);
+            this.lastProposalCandle = Object.create(null);
         }
 
         propose(direction, reason, score) {
             const symbol = this.bot.currentSymbol;
             const now = Date.now();
-            const cooldown = this.bot.settings.cooldowns.strategyProposalMs ?? 10000;
+            const context = this.bot.adaptiveLearning.getContext(symbol, this.bot.currentTimeframe);
 
-            // Stratejinin yön değiştirerek birkaç saniyede kendi oyunu tersine
-            // çevirmesini de engelle. Cooldown sembol bazındadır, yön bazında değil.
-            if (now - (this.lastProposalTime[symbol] || 0) < cooldown) return;
-            this.bot.confluenceEngine.propose(this.name, direction, reason, score);
-            this.lastProposalTime[symbol] = now;
+            if (this.family === 'candle') {
+                // Mum stratejileri aynı kapanmış mum için yalnızca bir oy verebilir.
+                // Milisaniye cooldown yerine veri periyoduyla senkron çalışır.
+                const candleTime = this.bot.getClosedCandles().at(-1)?.time;
+                if (!candleTime || this.lastProposalCandle[symbol] === candleTime) return;
+                this.lastProposalCandle[symbol] = candleTime;
+            } else {
+                const baseCooldown = this.bot.settings.cooldowns.strategyProposalMs ?? 10000;
+                const cooldown = this.bot.adaptiveLearning.getStrategyCooldown(
+                    this.name,
+                    context,
+                    baseCooldown,
+                    this.family
+                );
+                // Mikro-yapı stratejileri yön değiştirerek birkaç saniyede kendi
+                // oyunu tersine çeviremez. Cooldown yön değil sembol bazındadır.
+                if (now - (this.lastProposalTime[symbol] || 0) < cooldown) return;
+                this.lastProposalTime[symbol] = now;
+            }
+
+            this.bot.handleStrategyProposal(this, direction, reason, score);
         }
 
         analyzeOrderBook() {}
@@ -308,7 +326,7 @@
 
     class WallBounceStrategy extends Strategy {
         constructor(bot) {
-            super(bot, 'wallBounce');
+            super(bot, 'wallBounce', 'micro');
             this.distanceThreshold = 0.0005;
         }
         analyzeOrderBook(orderBook) {
@@ -325,7 +343,7 @@
 
     class VelocityScalpingStrategy extends Strategy {
         constructor(bot) {
-            super(bot, 'velocityScalping');
+            super(bot, 'velocityScalping', 'micro');
             this.points = [];
             this.windowMs = 2000;
             this.minPoints = 20;
@@ -366,7 +384,7 @@
 
     class OrderFlowMomentumStrategy extends Strategy {
         constructor(bot) {
-            super(bot, 'orderFlowMomentum');
+            super(bot, 'orderFlowMomentum', 'micro');
             this.trades = [];
             this.windowMs = 5000;
         }
@@ -391,7 +409,7 @@
 
     class LiquidityGapsStrategy extends Strategy {
         constructor(bot) {
-            super(bot, 'liquidityGaps');
+            super(bot, 'liquidityGaps', 'micro');
             this.threshold = 0.001;
         }
         analyzeOrderBook(orderBook) {
@@ -543,7 +561,7 @@
     }
 
     class InstitutionalOrderFlowStrategy extends Strategy {
-        constructor(bot) { super(bot, 'institutionalOrderFlow'); }
+        constructor(bot) { super(bot, 'institutionalOrderFlow', 'micro'); }
         analyzeOrderBook(orderBook) {
             if (!orderBook.bids.length || !orderBook.asks.length) return;
             const bids = orderBook.bids.slice(0, 5).reduce((sum, [, qty]) => sum + qty, 0);
@@ -554,7 +572,7 @@
     }
 
     class MicroSpreadArbitrageStrategy extends Strategy {
-        constructor(bot) { super(bot, 'microSpreadArbitrage'); }
+        constructor(bot) { super(bot, 'microSpreadArbitrage', 'micro'); }
         analyzeOrderBook(orderBook) {
             if (!orderBook.bids.length || !orderBook.asks.length) return;
             const bid = orderBook.bids[0][0];
@@ -634,12 +652,18 @@
             this.applySavedTheme();
             this.chartManager = new ChartManager('live-chart');
             this.heatmapManager = new HeatmapManager('orderbook-heatmap');
+            if (!window.UTCAdaptive) throw new Error('Adaptif öğrenme modülü yüklenemedi.');
+            this.eventBus = new window.UTCAdaptive.EventBus();
+            this.adaptiveLearning = new window.UTCAdaptive.AdaptiveLearningEngine(this, { eventBus: this.eventBus });
             this.confluenceEngine = new window.ConfluenceEngine(this);
             this.initStrategies();
+            this.learningReady = this.adaptiveLearning.initialize();
+            this.bindLearningEvents();
             this.bindEvents();
             this.syncControls();
             this.renderAll();
             this.renderSafetyChips();
+            this.renderLearning();
         }
 
         defaultSettings() {
@@ -659,6 +683,15 @@
                     reversalScoreMultiplier: 1.25,
                     blockedNoticeThrottleMs: 10000
                 },
+                learning: {
+                    minSamples: 20,
+                    optimizeEvery: 5,
+                    minWeight: 0.65,
+                    maxWeight: 1.35,
+                    shadowEnabled: true,
+                    shadowInfluence: 0.35,
+                    maxShadowTrades: 120
+                },
                 activeStrategies
             };
         }
@@ -673,6 +706,7 @@
                 params: { ...defaults.params, ...(saved.params || {}) },
                 cooldowns: { ...defaults.cooldowns, ...(saved.cooldowns || {}) },
                 signalSafety: { ...defaults.signalSafety, ...(saved.signalSafety || {}) },
+                learning: { ...defaults.learning, ...(saved.learning || {}) },
                 activeStrategies: { ...defaults.activeStrategies, ...(saved.activeStrategies || {}) }
             };
         }
@@ -688,6 +722,61 @@
             this.activeStrategies = {};
             Object.entries(this.strategies).forEach(([key, strategy]) => {
                 if (this.settings.activeStrategies[key]) this.activeStrategies[key] = strategy;
+            });
+        }
+
+        handleStrategyProposal(strategy, direction, reason, baseScore) {
+            const regime = this.adaptiveLearning.currentRegime;
+            const context = this.adaptiveLearning.getContext(this.currentSymbol, this.currentTimeframe);
+            const proposal = {
+                strategy: strategy.name,
+                family: strategy.family,
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                direction,
+                reason,
+                score: Number(baseScore),
+                price: this.marketData.price,
+                regime,
+                context,
+                timestamp: Date.now(),
+                contributesToSignal: Boolean(this.activeStrategies[strategy.name])
+            };
+
+            // Aktif veya pasif tüm stratejiler shadow olarak ölçülür. Yalnızca
+            // kullanıcı tarafından aktif edilen stratejiler nihai sinyale oy verir.
+            this.adaptiveLearning.observeProposal(proposal);
+            if (!proposal.contributesToSignal) return;
+
+            const adaptiveWeight = this.adaptiveLearning.getWeight(strategy.name, context);
+            const effectiveScore = Math.round(Number(baseScore) * adaptiveWeight * 100) / 100;
+            this.confluenceEngine.propose(strategy.name, direction, reason, effectiveScore, {
+                baseScore: Number(baseScore),
+                adaptiveWeight,
+                context,
+                regime,
+                family: strategy.family,
+                timeframe: this.currentTimeframe
+            });
+        }
+
+        bindLearningEvents() {
+            const render = () => this.renderLearning();
+            this.eventBus.on('learning.ready', render);
+            this.eventBus.on('learning.updated', render);
+            this.eventBus.on('learning.reset', render);
+            this.eventBus.on('optimizer.updated', render);
+            this.eventBus.on('market.regime.changed', render);
+
+            document.getElementById('learning-mode').addEventListener('change', event => {
+                this.adaptiveLearning.setMode(event.target.value);
+                this.notify(`Öğrenme modu: ${event.target.options[event.target.selectedIndex].text}`, 'info');
+            });
+            document.getElementById('export-learning-btn').addEventListener('click', () => this.exportLearningData());
+            document.getElementById('reset-learning-btn').addEventListener('click', async () => {
+                if (!window.confirm('Tüm adaptif strateji istatistikleri ve shadow işlemleri silinsin mi?')) return;
+                await this.adaptiveLearning.reset();
+                this.notify('Adaptif öğrenme verileri sıfırlandı.', 'warning');
             });
         }
 
@@ -745,8 +834,9 @@
             document.getElementById('start-btn').disabled = true;
             document.getElementById('stop-btn').disabled = false;
             this.updateConnection(false, 'BAĞLANIYOR');
-            this.notify('Sistem başlatılıyor; piyasa verisi yükleniyor.', 'success');
+            this.notify('Sistem başlatılıyor; öğrenme durumu ve piyasa verisi yükleniyor.', 'success');
 
+            await this.learningReady;
             await this.fetchInitialData();
             if (!this.isRunning) return;
             this.connectWebSocket(false);
@@ -885,6 +975,7 @@
                     this.marketData.price = Number(data.c);
                     this.marketData.change24h = Number(data.P);
                     this.marketData.volume24h = Number(data.q);
+                    this.adaptiveLearning.onPrice(this.currentSymbol, this.marketData.price);
                     this.checkAutoCloseSignals();
                     this.renderPrice();
                 }
@@ -898,7 +989,7 @@
                 };
                 this.heatmapManager.draw(this.orderBook, this.marketData.price);
                 document.getElementById('heatmap-empty').classList.toggle('hidden', this.orderBook.bids.length > 0);
-                Object.values(this.activeStrategies).forEach(strategy => strategy.analyzeOrderBook(this.orderBook));
+                Object.values(this.strategies).forEach(strategy => strategy.analyzeOrderBook(this.orderBook));
                 return;
             }
 
@@ -928,7 +1019,7 @@
                     isBuyerMaker: Boolean(data.m),
                     timestamp: Number(data.T)
                 };
-                Object.values(this.activeStrategies).forEach(strategy => strategy.processTrade(trade));
+                Object.values(this.strategies).forEach(strategy => strategy.processTrade(trade));
             }
         }
 
@@ -946,7 +1037,8 @@
         runPeriodicAnalysis() {
             if (!this.isRunning) return;
             this.calculateIndicators();
-            Object.values(this.activeStrategies).forEach(strategy => strategy.periodicAnalyze());
+            this.eventBus.emit('market.regime.check');
+            Object.values(this.strategies).forEach(strategy => strategy.periodicAnalyze());
         }
 
         calculateIndicators() {
@@ -1033,6 +1125,7 @@
             this.signals.unshift(signal);
             this.signals = this.signals.slice(0, 200);
             this.saveData(STORAGE.signals, this.signals);
+            this.eventBus.emit('signal.generated', { signal });
             this.chartManager.setSignalMarkers(this.signals.filter(item => item.symbol === this.currentSymbol));
             this.renderSignals();
             this.renderStats();
@@ -1057,6 +1150,7 @@
                     signal.closedAt = Date.now();
                     signal.closedPrice = price;
                     changed = true;
+                    this.eventBus.emit('signal.closed', { signal, price });
                     this.notify(`Sinyal ${signal.status.toUpperCase()} ile kapandı.`, hitTp ? 'success' : 'danger');
                 }
             });
@@ -1189,7 +1283,7 @@
         }
 
         fillSettingsForm() {
-            const { params, cooldowns, signalSafety } = this.settings;
+            const { params, cooldowns, signalSafety, learning } = this.settings;
             this.setInput('setting-threshold', this.settings.confluenceThreshold);
             this.setInput('setting-rsi', params.rsiPeriod);
             this.setInput('setting-atr', params.atrPeriod);
@@ -1206,6 +1300,12 @@
             this.setInput('setting-reversal-confirmations', signalSafety.minReversalConfirmations);
             this.setInput('setting-reversal-multiplier', signalSafety.reversalScoreMultiplier);
             document.getElementById('setting-active-lock').checked = signalSafety.preventSignalsWhileActive;
+            this.setInput('setting-learning-min-samples', learning.minSamples);
+            this.setInput('setting-learning-every', learning.optimizeEvery);
+            this.setInput('setting-shadow-influence', learning.shadowInfluence);
+            this.setInput('setting-min-weight', learning.minWeight);
+            this.setInput('setting-max-weight', learning.maxWeight);
+            document.getElementById('setting-shadow-enabled').checked = learning.shadowEnabled;
 
             document.getElementById('strategy-toggles').innerHTML = Object.keys(this.strategyClasses).map(key => `
                 <label class="strategy-toggle">
@@ -1216,7 +1316,10 @@
         }
 
         applySettingsFromForm() {
-            const number = (id, fallback, min, max) => clamp(Number(document.getElementById(id).value) || fallback, min, max);
+            const number = (id, fallback, min, max) => {
+                const parsed = Number(document.getElementById(id).value);
+                return clamp(Number.isFinite(parsed) ? parsed : fallback, min, max);
+            };
             const proposalTimeout = number('setting-proposal-timeout', 3000, 500, 30000);
             const evaluationDelay = Math.min(number('setting-evaluation-delay', 1000, 100, 10000), Math.max(100, proposalTimeout - 100));
             const activeStrategies = {};
@@ -1246,6 +1349,15 @@
                     reversalScoreMultiplier: number('setting-reversal-multiplier', 1.25, 1, 5),
                     blockedNoticeThrottleMs: 10000
                 },
+                learning: {
+                    minSamples: number('setting-learning-min-samples', 20, 5, 500),
+                    optimizeEvery: number('setting-learning-every', 5, 1, 100),
+                    minWeight: number('setting-min-weight', 0.65, 0.2, 1),
+                    maxWeight: number('setting-max-weight', 1.35, 1, 3),
+                    shadowEnabled: document.getElementById('setting-shadow-enabled').checked,
+                    shadowInfluence: number('setting-shadow-influence', 0.35, 0, 1),
+                    maxShadowTrades: this.settings.learning.maxShadowTrades || 120
+                },
                 activeStrategies
             };
             this.saveData(STORAGE.settings, this.settings);
@@ -1253,6 +1365,7 @@
             this.updateActiveStrategies();
             this.calculateIndicators();
             this.renderSafetyChips();
+            this.renderLearning();
             this.notify('Ayarlar kaydedildi; bekleyen teklifler temizlendi.', 'success');
         }
 
@@ -1264,6 +1377,7 @@
             this.updateActiveStrategies();
             this.fillSettingsForm();
             this.renderSafetyChips();
+            this.renderLearning();
             this.notify('Varsayılan güvenli ayarlar yüklendi.', 'info');
         }
 
@@ -1275,6 +1389,65 @@
                 `${Math.round(safety.oppositeSignalLockMs / 1000)} sn ters kilit`,
                 `×${safety.reversalScoreMultiplier} ters skor`
             ].map(text => `<span>${this.escapeHtml(text)}</span>`).join('');
+        }
+
+        renderLearning() {
+            if (!this.adaptiveLearning) return;
+            const summary = this.adaptiveLearning.getSummary();
+            document.getElementById('learning-mode').value = summary.mode;
+            document.getElementById('learning-regime').textContent = summary.regime.replace(':', ' · ');
+            document.getElementById('learning-live-count').textContent = Math.round(summary.totalLive);
+            document.getElementById('learning-shadow-count').textContent = Math.round(summary.totalShadow);
+            document.getElementById('learning-active-shadow').textContent = summary.activeShadowTrades;
+            document.getElementById('learning-optimization-count').textContent = summary.optimizationCount;
+            document.getElementById('learning-global-cooldown').textContent = `×${summary.globalCooldownMultiplier.toFixed(2)}`;
+
+            const status = document.getElementById('learning-status');
+            if (summary.mode === 'paused') {
+                status.textContent = 'Öğrenme durduruldu. Sinyal motoru temel skor ve cooldown değerleriyle çalışıyor.';
+            } else if (summary.mode === 'shadow') {
+                status.textContent = 'Shadow modu: Sonuçlar kaydediliyor fakat ağırlık ve cooldown değerleri sinyallere uygulanmıyor.';
+            } else if (summary.warmupRemaining > 0) {
+                status.textContent = `Warm-up aktif: İlk adaptif ağırlık için yaklaşık ${Math.ceil(summary.warmupRemaining)} etkili sonuç daha gerekiyor. Shadow sonuçların etkisi sınırlıdır.`;
+            } else {
+                status.textContent = `Otomatik optimizasyon aktif. Ağırlıklar ${this.settings.learning.minWeight.toFixed(2)}–${this.settings.learning.maxWeight.toFixed(2)} sınırında; hard güvenlik kuralları değiştirilemez.`;
+            }
+
+            const body = document.getElementById('learning-body');
+            if (!summary.rows.length) {
+                body.innerHTML = '<tr><td colspan="9" class="table-empty">Öğrenme verisi bekleniyor.</td></tr>';
+                return;
+            }
+            body.innerHTML = summary.rows.map(row => {
+                const weightClass = row.weight > 1.005 ? 'up' : row.weight < 0.995 ? 'down' : 'neutral';
+                const cooldown = row.cooldown === null ? 'Mum bazlı' : `${(row.cooldown / 1000).toFixed(1)} sn`;
+                return `
+                    <tr>
+                        <td>${this.escapeHtml(row.displayName)}</td>
+                        <td><span class="role-pill ${row.active ? 'live' : 'shadow'}">${row.active ? 'LIVE + SHADOW' : 'SHADOW'}</span></td>
+                        <td>${row.liveCount}</td>
+                        <td>${row.shadowCount}</td>
+                        <td>${row.winRate === null ? '—' : `${(row.winRate * 100).toFixed(1)}%`}</td>
+                        <td class="${row.averageR > 0 ? 'positive' : row.averageR < 0 ? 'negative' : ''}">${row.effectiveCount ? row.averageR.toFixed(2) : '—'}</td>
+                        <td class="${row.ewmaR > 0 ? 'positive' : row.ewmaR < 0 ? 'negative' : ''}">${row.effectiveCount ? row.ewmaR.toFixed(2) : '—'}</td>
+                        <td><span class="weight-pill ${weightClass}">×${row.weight.toFixed(2)}</span></td>
+                        <td>${cooldown}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        exportLearningData() {
+            const blob = new Blob([this.adaptiveLearning.exportState()], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `utc-learning-${this.currentSymbol}-${Date.now()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            this.notify('Öğrenme istatistikleri JSON olarak dışa aktarıldı.', 'success');
         }
 
         applySavedTheme() {

@@ -6,6 +6,28 @@ Bu repo, paylaşılan tarayıcı tabanlı scanner'daki **birkaç saniye içinde 
 
 > Bu yazılım yatırım tavsiyesi vermez. Canlı hesapta kullanmadan önce paper trading ve geçmiş veri üzerinde test edilmelidir.
 
+## Adaptif hibrit öğrenme
+
+Scanner artık `src/adaptive-learning.js` üzerinden sınırlandırılmış bir öğrenme katmanı kullanır:
+
+- Aktif ve pasif bütün strateji teklifleri shadow TP/SL ile takip edilir.
+- Nihai sinyale katkıda bulunan stratejilerin live sonuçları ayrıca ölçülür.
+- İstatistikler sembol, zaman dilimi ve piyasa rejimi bağlamında tutulur.
+- Bayesian başarı oranı, ortalama R ve EWMA R beraber değerlendirilir.
+- İlk 20 etkili örnek boyunca ağırlıklar nötr (`1.00`) kalır.
+- Sonrasında ağırlıklar varsayılan olarak yalnızca `0.65–1.35` aralığında değişebilir.
+- Mikro-yapı stratejilerinin cooldown değerleri kayıp serisi, R beklentisi ve güvenilirliğe göre yavaşça optimize edilir.
+- Mum tabanlı stratejiler aynı kapanmış mumda yalnızca bir teklif verebilir.
+- Global ve ters yön cooldown korumaları yalnızca güvenli yönde ayarlanır; hard sinyal kilitleri optimizer tarafından kapatılamaz.
+- Strateji ikililerinin ortak sonuçları gelecekteki kombinasyon optimizasyonu için kaydedilir.
+- Veriler tarayıcıdaki IndexedDB'de saklanır ve panelden JSON olarak dışa aktarılabilir.
+
+Öğrenme Merkezi üç çalışma modu sunar:
+
+- **Otomatik:** Warm-up sonrasında sınırlı ağırlık ve cooldown optimizasyonu uygulanır.
+- **Sadece Shadow:** Sonuçlar toplanır fakat sinyal skorlarına uygulanmaz.
+- **Durduruldu:** Öğrenme ve adaptif etkiler kapatılır; temel ayarlar kullanılır.
+
 ## Sorunun gerçek nedeni
 
 Eski motorda beş kritik mantık problemi vardı:

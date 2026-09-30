@@ -305,6 +305,27 @@ tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, transparent);
 .safety-chips { margin-left: auto; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .safety-chips span { padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); background: var(--panel-3); font-size: 8px; }
 
+.learning-panel { margin-top: 14px; overflow: hidden; }
+.learning-heading { min-height: 72px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.learning-actions { display: flex; align-items: flex-end; gap: 7px; }
+.compact-select { display: grid; gap: 3px; }
+.compact-select span { color: var(--muted); font-size: 8px; font-weight: 700; }
+.compact-select select { min-height: 30px; padding: 4px 28px 4px 8px; font-size: 9px; }
+.learning-summary { padding: 12px 14px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
+.learning-summary article { padding: 10px; display: grid; gap: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-3); }
+.learning-summary span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.learning-summary strong { overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.learning-status { margin: 0 14px 12px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border)); border-radius: 9px; color: var(--muted); background: color-mix(in srgb, var(--primary) 6%, var(--panel-3)); font-size: 9px; }
+.learning-table-wrap { max-height: 410px; overflow: auto; border-top: 1px solid var(--border); }
+.learning-table th, .learning-table td { padding: 9px 12px; }
+.role-pill, .weight-pill { display: inline-flex; padding: 3px 6px; border-radius: 999px; font-size: 8px; font-weight: 700; }
+.role-pill.live { color: var(--positive); background: color-mix(in srgb, var(--positive) 10%, transparent); }
+.role-pill.shadow { color: var(--muted); background: var(--panel-3); }
+.weight-pill.up { color: var(--positive); background: color-mix(in srgb, var(--positive) 10%, transparent); }
+.weight-pill.down { color: var(--negative); background: color-mix(in srgb, var(--negative) 10%, transparent); }
+.weight-pill.neutral { color: var(--muted); background: var(--panel-3); }
+.learning-fieldset { border-color: color-mix(in srgb, var(--positive) 25%, var(--border)); }
+
 .settings-dialog {
     width: min(900px, calc(100% - 24px));
     max-height: min(90vh, 900px);
@@ -351,6 +372,7 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .market-panel { min-height: 560px; }
     .signals-panel { min-height: 480px; }
     .strategy-grid { grid-template-columns: repeat(2, 1fr); }
+    .learning-summary { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 720px) {
@@ -368,6 +390,9 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .market-heading { align-items: flex-start; height: auto; min-height: 68px; }
     .safety-panel { align-items: flex-start; }
     .safety-chips { margin-left: 0; }
+    .learning-heading { align-items: flex-start; flex-direction: column; }
+    .learning-actions { width: 100%; flex-wrap: wrap; }
+    .learning-actions .compact-select { flex: 1; }
     .settings-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -382,6 +407,8 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .market-heading { padding: 12px; gap: 8px; flex-direction: column; }
     .visual-view { height: calc(100% - 98px); min-height: 400px; }
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .learning-summary { grid-template-columns: repeat(2, 1fr); }
+    .learning-actions .btn { flex: 1; }
     .settings-grid, .strategy-grid { grid-template-columns: 1fr; }
     .dialog-footer { align-items: stretch; flex-direction: column-reverse; }
     .dialog-footer-right { display: grid; grid-template-columns: 1fr 1fr; }

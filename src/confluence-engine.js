@@ -36,7 +36,7 @@
             this._lastBlockedNotice = new Map();
         }
 
-        propose(strategy, direction, reason, score) {
+        propose(strategy, direction, reason, score, metadata = {}) {
             const symbol = this.bot.currentSymbol;
             const numericScore = Number(score);
 
@@ -58,6 +58,12 @@
                 direction,
                 reason,
                 score: numericScore,
+                baseScore: Number(metadata.baseScore) || numericScore,
+                adaptiveWeight: Number(metadata.adaptiveWeight) || 1,
+                context: metadata.context || null,
+                regime: metadata.regime || null,
+                family: metadata.family || null,
+                timeframe: metadata.timeframe || this.bot.currentTimeframe || null,
                 timestamp: now
             });
 
@@ -226,6 +232,9 @@
                 id: `sig_${now}_${++this._signalSequence}`,
                 timestamp: now,
                 symbol: this.bot.currentSymbol,
+                timeframe: this.bot.currentTimeframe || proposals[0]?.timeframe || null,
+                context: proposals[0]?.context || null,
+                regime: proposals[0]?.regime || null,
                 direction,
                 price: Number(this.bot.marketData.price),
                 score: totalScore,
@@ -234,7 +243,12 @@
                 details: proposals.map(proposal => ({
                     strategy: proposal.strategy,
                     reason: proposal.reason,
-                    score: proposal.score
+                    score: proposal.score,
+                    baseScore: proposal.baseScore,
+                    adaptiveWeight: proposal.adaptiveWeight,
+                    context: proposal.context,
+                    regime: proposal.regime,
+                    family: proposal.family
                 })),
                 diagnostics,
                 status: 'active',
@@ -294,11 +308,24 @@
 
         _getCooldown(key, fallback) {
             const value = Number(this.bot.settings && this.bot.settings.cooldowns && this.bot.settings.cooldowns[key]);
-            return Number.isFinite(value) && value >= 0 ? value : fallback;
+            const configured = Number.isFinite(value) && value >= 0 ? value : fallback;
+            if (
+                this.bot.adaptiveLearning
+                && typeof this.bot.adaptiveLearning.getGlobalCooldown === 'function'
+                && (key === 'signalMs' || key === 'sameDirectionMs')
+            ) {
+                return this.bot.adaptiveLearning.getGlobalCooldown(key, configured);
+            }
+            return configured;
         }
 
         _getSafetySettings() {
             const configured = (this.bot.settings && this.bot.settings.signalSafety) || {};
+            const baseOppositeLock = this._nonNegative(configured.oppositeSignalLockMs, 120000);
+            const oppositeSignalLockMs = this.bot.adaptiveLearning
+                && typeof this.bot.adaptiveLearning.getOppositeLock === 'function'
+                ? this.bot.adaptiveLearning.getOppositeLock(baseOppositeLock)
+                : baseOppositeLock;
             return {
                 // İlk oy gelir gelmez karar vermek yerine diğer stratejilere kısa bir
                 // süre tanınır. Bu, sıra bağımlı "ilk gelen kazanır" hatasını giderir.
@@ -309,7 +336,7 @@
                 // teyit gibi sunulmaz.
                 minConfirmations: Math.max(1, Math.floor(this._nonNegative(configured.minConfirmations, 2))),
                 preventSignalsWhileActive: configured.preventSignalsWhileActive !== false,
-                oppositeSignalLockMs: this._nonNegative(configured.oppositeSignalLockMs, 120000),
+                oppositeSignalLockMs,
                 minReversalConfirmations: Math.max(1, Math.floor(this._nonNegative(configured.minReversalConfirmations, 2))),
                 reversalScoreMultiplier: Math.max(1, this._nonNegative(configured.reversalScoreMultiplier, 1.25)),
                 blockedNoticeThrottleMs: this._nonNegative(configured.blockedNoticeThrottleMs, 10000)
@@ -340,6 +367,9 @@
             // Engellenen teklifleri tüket. Aktif işlem kapanınca birkaç saniye önceki
             // bayat karşıt teklifin aniden sinyale dönüşmesini istemiyoruz.
             this.clearProposals(symbol);
+            if (this.bot.eventBus && typeof this.bot.eventBus.emit === 'function') {
+                this.bot.eventBus.emit('signal.blocked', { symbol, direction, reason, message, timestamp: now });
+            }
             this._logBlockedOnce(`${symbol}:${direction}:${reason}`, message, now);
             return { status: 'blocked', direction, reason, message };
         }

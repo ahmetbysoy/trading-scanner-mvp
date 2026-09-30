@@ -8,10 +8,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./styles.css?v=3">
     <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script defer src="./src/confluence-engine.js"></script>
-    <script defer src="./src/app.js"></script>
+    <script defer src="./src/adaptive-learning.js?v=3"></script>
+    <script defer src="./src/confluence-engine.js?v=3"></script>
+    <script defer src="./src/app.js?v=3"></script>
 </head>
 <body>
     <noscript>Bu uygulamayı kullanmak için JavaScript etkin olmalıdır.</noscript>
@@ -177,6 +178,61 @@
             </div>
             <div class="safety-chips" id="safety-chips"></div>
         </section>
+
+        <section class="learning-panel panel" aria-labelledby="learning-title">
+            <div class="panel-heading learning-heading">
+                <div>
+                    <span class="eyebrow">ADAPTİF HİBRİT MOTOR</span>
+                    <h2 id="learning-title">Strateji Öğrenme Merkezi</h2>
+                </div>
+                <div class="learning-actions">
+                    <label class="compact-select">
+                        <span>Mod</span>
+                        <select id="learning-mode" aria-label="Öğrenme modu">
+                            <option value="auto">Otomatik</option>
+                            <option value="shadow">Sadece Shadow</option>
+                            <option value="paused">Durduruldu</option>
+                        </select>
+                    </label>
+                    <button id="export-learning-btn" class="btn btn-small btn-ghost" type="button">JSON Aktar</button>
+                    <button id="reset-learning-btn" class="btn btn-small btn-danger" type="button">Öğrenmeyi Sıfırla</button>
+                </div>
+            </div>
+
+            <div class="learning-summary">
+                <article><span>Piyasa Rejimi</span><strong id="learning-regime">Hazırlanıyor</strong></article>
+                <article><span>Live Sonuç</span><strong id="learning-live-count">0</strong></article>
+                <article><span>Shadow Sonuç</span><strong id="learning-shadow-count">0</strong></article>
+                <article><span>Aktif Shadow</span><strong id="learning-active-shadow">0</strong></article>
+                <article><span>Optimizasyon</span><strong id="learning-optimization-count">0</strong></article>
+                <article><span>Global Cooldown</span><strong id="learning-global-cooldown">×1.00</strong></article>
+            </div>
+
+            <div class="learning-status" id="learning-status">
+                İstatistikler yükleniyor. Ağırlıklar yeterli örnek oluşana kadar nötr kalır.
+            </div>
+
+            <div class="learning-table-wrap">
+                <table class="learning-table">
+                    <thead>
+                        <tr>
+                            <th>Strateji</th>
+                            <th>Rol</th>
+                            <th>Live</th>
+                            <th>Shadow</th>
+                            <th>Bayes Win%</th>
+                            <th>Ort. R</th>
+                            <th>EWMA R</th>
+                            <th>Ağırlık</th>
+                            <th>Cooldown</th>
+                        </tr>
+                    </thead>
+                    <tbody id="learning-body">
+                        <tr><td colspan="9" class="table-empty">Öğrenme verisi bekleniyor.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
     </main>
 
     <dialog id="settings-dialog" class="settings-dialog">
@@ -215,6 +271,21 @@
                     <label class="toggle-row">
                         <span><b>Aktif sinyal kilidi</b><small>Aktif işlem kapanmadan yeni veya ters sinyal üretme.</small></span>
                         <input id="setting-active-lock" type="checkbox">
+                    </label>
+                </fieldset>
+
+                <fieldset class="learning-fieldset">
+                    <legend>Adaptif Öğrenme</legend>
+                    <div class="settings-grid">
+                        <label class="field"><span>Minimum Örnek</span><input id="setting-learning-min-samples" type="number" min="5" max="500" step="1"></label>
+                        <label class="field"><span>Optimizasyon Aralığı (sonuç)</span><input id="setting-learning-every" type="number" min="1" max="100" step="1"></label>
+                        <label class="field"><span>Shadow Etkisi</span><input id="setting-shadow-influence" type="number" min="0" max="1" step="0.05"></label>
+                        <label class="field"><span>Minimum Ağırlık</span><input id="setting-min-weight" type="number" min="0.2" max="1" step="0.05"></label>
+                        <label class="field"><span>Maksimum Ağırlık</span><input id="setting-max-weight" type="number" min="1" max="3" step="0.05"></label>
+                    </div>
+                    <label class="toggle-row">
+                        <span><b>Shadow değerlendirme</b><small>Nihai sinyale katılmayan stratejileri hayali TP/SL ile ölç.</small></span>
+                        <input id="setting-shadow-enabled" type="checkbox">
                     </label>
                 </fieldset>
 
