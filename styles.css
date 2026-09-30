@@ -289,6 +289,8 @@ table { width: 100%; border-collapse: collapse; font-size: 9px; }
 th, td { padding: 9px 8px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
 th { position: sticky; top: 0; z-index: 2; color: var(--muted); background: var(--panel); font-size: 8px; letter-spacing: .06em; }
 tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, transparent); }
+.signal-row { cursor: pointer; }
+.signal-row:hover { background: color-mix(in srgb, var(--primary) 9%, transparent); }
 .direction-pill, .status-pill { padding: 3px 6px; border-radius: 999px; font-weight: 700; }
 .direction-pill.buy, .status-pill.tp { color: var(--positive); background: color-mix(in srgb, var(--positive) 11%, transparent); }
 .direction-pill.sell, .status-pill.sl { color: var(--negative); background: color-mix(in srgb, var(--negative) 11%, transparent); }
@@ -337,6 +339,13 @@ tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, transparent);
     box-shadow: 0 35px 100px rgba(0,0,0,.55);
 }
 .settings-dialog::backdrop { background: rgba(2, 5, 9, .76); backdrop-filter: blur(5px); }
+.signal-detail-dialog { width: min(1050px, calc(100% - 24px)); }
+.signal-detail-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.signal-detail-summary article { padding: 10px; display: grid; gap: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-3); }
+.signal-detail-summary span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.signal-detail-summary strong { font-size: 10px; }
+.detail-section-title { margin: 18px 0 8px; color: var(--primary); font-size: 10px; }
+.detail-table-wrap { max-height: 230px; border: 1px solid var(--border); border-radius: 10px; }
 .settings-dialog form { display: flex; max-height: inherit; flex-direction: column; }
 .dialog-heading { padding: 16px 18px; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .dialog-heading .icon-btn { font-size: 20px; }
@@ -373,6 +382,7 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .signals-panel { min-height: 480px; }
     .strategy-grid { grid-template-columns: repeat(2, 1fr); }
     .learning-summary { grid-template-columns: repeat(3, 1fr); }
+    .signal-detail-summary { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 720px) {

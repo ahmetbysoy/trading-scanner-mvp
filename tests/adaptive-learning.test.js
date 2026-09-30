@@ -160,6 +160,19 @@ test('ters yön kilidi optimizer tarafından temel değerin altına indirilemez'
     assert.equal(h.engine.getOppositeLock(120_000), 180_000);
 });
 
+test('ADX rejim güveni momentum ve mean-reversion ailelerini farklı yönlendirir', async () => {
+    const h = createHarness();
+    await h.engine.initialize();
+
+    assert.ok(h.engine.regimeDetector.adx > 20);
+    assert.match(h.engine.currentRegime, /^trend-up:/);
+    assert.ok(h.engine.getRegimeFactor('momentum') > 1);
+    assert.ok(h.engine.getRegimeFactor('mean-reversion') < 1);
+
+    h.engine.setMode('shadow');
+    assert.equal(h.engine.getRegimeFactor('momentum'), 1);
+});
+
 test('live sinyal sonucu katkıda bulunan stratejileri ve ikili ortaklığı günceller', async () => {
     const h = createHarness();
     await h.engine.initialize();

@@ -151,4 +151,19 @@ test('uygulama null ticker verisiyle hatasız açılır ve adaptif paneli oluşt
     assert.equal(context.elements.get('ticker-change').textContent, '—');
     assert.equal(context.elements.get('learning-mode').value, 'auto');
     assert.match(context.elements.get('learning-status').textContent, /Warm-up/);
+
+    context.app.signals = [{
+        id: 'sig-detail', timestamp: Date.now(), symbol: 'BTCUSDT', timeframe: '15m',
+        direction: 'buy', price: 100, tp: 102, sl: 99, score: 6, rawScore: 7,
+        confirmations: 2, regime: 'trend-up:normal', status: 'active',
+        details: [{
+            strategy: 'breakoutPattern', reason: 'Hacimli kırılım', baseScore: 4,
+            adaptiveWeight: 1.1, regimeFactor: 1.05, score: 4.62,
+            evidenceFamily: 'momentum'
+        }],
+        diagnostics: { scoreLead: 4, independentFamilies: 2, conviction: { windows: 2, elapsedMs: 900 } }
+    }];
+    context.app.openSignalDetail('sig-detail');
+    assert.match(context.elements.get('signal-contributors-body').innerHTML, /Hacimli kırılım/);
+    assert.equal(context.elements.get('signal-detail-dialog').open, true);
 });

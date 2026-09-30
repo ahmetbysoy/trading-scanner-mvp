@@ -28,6 +28,25 @@
         superTrend: 'Trend Kırılımı'
     };
 
+    const STRATEGY_EVIDENCE_FAMILIES = {
+        wallBounce: 'microstructure',
+        velocityScalping: 'momentum',
+        rsiDivergence: 'mean-reversion',
+        orderFlowMomentum: 'microstructure',
+        liquidityGaps: 'microstructure',
+        breakoutPattern: 'momentum',
+        supportResistance: 'mean-reversion',
+        fibonacciRetracement: 'mean-reversion',
+        volumeProfile: 'momentum',
+        smartMoneyConcepts: 'structure',
+        divergenceDetection: 'mean-reversion',
+        marketStructure: 'structure',
+        institutionalOrderFlow: 'microstructure',
+        microSpreadArbitrage: 'mean-reversion',
+        vwapReversion: 'mean-reversion',
+        superTrend: 'momentum'
+    };
+
     const DEFAULT_ACTIVE = new Set([
         'wallBounce',
         'velocityScalping',
@@ -286,6 +305,7 @@
             this.bot = bot;
             this.name = name;
             this.family = family;
+            this.evidenceFamily = STRATEGY_EVIDENCE_FAMILIES[name] || 'other';
             this.displayName = STRATEGY_LABELS[name] || name;
             this.lastProposalTime = Object.create(null);
             this.lastProposalCandle = Object.create(null);
@@ -677,10 +697,21 @@
                     evaluationDelayMs: 1000,
                     minScoreLead: 2,
                     minConfirmations: 2,
+                    minIndependentFamilies: 2,
+                    maxFamilyContributionRatio: 0.60,
                     preventSignalsWhileActive: true,
                     oppositeSignalLockMs: 120000,
                     minReversalConfirmations: 2,
                     reversalScoreMultiplier: 1.25,
+                    reverseHysteresisPoints: 2,
+                    minConvictionWindows: 2,
+                    minReversalConvictionWindows: 3,
+                    minConvictionMs: 600,
+                    minReversalConvictionMs: 1200,
+                    convictionWindowMs: 700,
+                    convictionAlpha: 0.35,
+                    reversalAtrInvalidation: 0.5,
+                    requireClosedCandleForReversal: false,
                     blockedNoticeThrottleMs: 10000
                 },
                 learning: {
@@ -731,6 +762,7 @@
             const proposal = {
                 strategy: strategy.name,
                 family: strategy.family,
+                evidenceFamily: strategy.evidenceFamily,
                 symbol: this.currentSymbol,
                 timeframe: this.currentTimeframe,
                 direction,
@@ -749,13 +781,16 @@
             if (!proposal.contributesToSignal) return;
 
             const adaptiveWeight = this.adaptiveLearning.getWeight(strategy.name, context);
-            const effectiveScore = Math.round(Number(baseScore) * adaptiveWeight * 100) / 100;
+            const regimeFactor = this.adaptiveLearning.getRegimeFactor(strategy.evidenceFamily);
+            const effectiveScore = Math.round(Number(baseScore) * adaptiveWeight * regimeFactor * 100) / 100;
             this.confluenceEngine.propose(strategy.name, direction, reason, effectiveScore, {
                 baseScore: Number(baseScore),
                 adaptiveWeight,
+                regimeFactor,
                 context,
                 regime,
                 family: strategy.family,
+                evidenceFamily: strategy.evidenceFamily,
                 timeframe: this.currentTimeframe
             });
         }
@@ -786,6 +821,13 @@
             document.getElementById('theme-btn').addEventListener('click', () => this.toggleTheme());
             document.getElementById('settings-btn').addEventListener('click', () => this.openSettings());
             document.getElementById('clear-signals-btn').addEventListener('click', () => this.clearSignals());
+            document.getElementById('signals-body').addEventListener('click', event => {
+                const row = event.target.closest ? event.target.closest('[data-signal-id]') : null;
+                if (row) this.openSignalDetail(row.dataset.signalId);
+            });
+            document.getElementById('close-signal-detail-btn').addEventListener('click', () => {
+                document.getElementById('signal-detail-dialog').close();
+            });
 
             document.getElementById('symbol-input').addEventListener('change', event => {
                 const base = this.sanitizeSymbol(event.target.value);
@@ -1211,7 +1253,7 @@
                 return;
             }
             body.innerHTML = this.signals.slice(0, 100).map(signal => `
-                <tr title="${this.escapeHtml(signal.reason || '')}">
+                <tr class="signal-row" data-signal-id="${this.escapeHtml(signal.id)}" title="Detay için tıkla · ${this.escapeHtml(signal.reason || '')}">
                     <td>${new Date(signal.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
                     <td><span class="direction-pill ${signal.direction}">${signal.direction.toUpperCase()}</span></td>
                     <td>${this.formatPrice(signal.price)}</td>
@@ -1220,6 +1262,54 @@
                     <td><span class="status-pill ${signal.status}">${signal.status.toUpperCase()}</span></td>
                 </tr>
             `).join('');
+        }
+
+        openSignalDetail(signalId) {
+            const signal = this.signals.find(item => item.id === signalId);
+            if (!signal) return;
+            const diagnostics = signal.diagnostics || {};
+            const conviction = diagnostics.conviction || {};
+            const familyCount = diagnostics.independentFamilies || new Set((signal.details || []).map(item => item.evidenceFamily)).size;
+            document.getElementById('signal-detail-title').textContent = `${signal.direction.toUpperCase()} · ${signal.symbol.replace('USDT', '/USDT')} · Skor ${signal.score}`;
+            document.getElementById('signal-detail-summary').innerHTML = `
+                <article><span>Durum</span><strong class="${signal.status === 'tp' ? 'positive' : signal.status === 'sl' ? 'negative' : ''}">${signal.status.toUpperCase()}</strong></article>
+                <article><span>Etkin / Ham Skor</span><strong>${signal.score} / ${signal.rawScore ?? signal.score}</strong></article>
+                <article><span>Bağımsız Teyit</span><strong>${signal.confirmations || 1} strateji · ${familyCount} aile</strong></article>
+                <article><span>Skor Farkı</span><strong>${Number(diagnostics.scoreLead || 0).toFixed(2)}</strong></article>
+                <article><span>Kararlılık</span><strong>${conviction.windows || 1} pencere · ${Math.round(conviction.elapsedMs || 0)} ms</strong></article>
+                <article><span>Rejim</span><strong>${this.escapeHtml(signal.regime || 'bilinmiyor')}</strong></article>
+                <article><span>Giriş</span><strong>${this.formatPrice(signal.price)}</strong></article>
+                <article><span>TP / SL</span><strong>${this.formatPrice(signal.tp)} / ${this.formatPrice(signal.sl)}</strong></article>
+            `;
+
+            const contributors = signal.details || [];
+            document.getElementById('signal-contributors-body').innerHTML = contributors.length
+                ? contributors.map(detail => `
+                    <tr>
+                        <td>${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
+                        <td>${this.escapeHtml(detail.evidenceFamily || '—')}</td>
+                        <td>${this.escapeHtml(detail.reason || '—')}</td>
+                        <td>${Number(detail.baseScore ?? detail.score ?? 0).toFixed(2)}</td>
+                        <td>×${Number(detail.adaptiveWeight || 1).toFixed(2)}</td>
+                        <td>×${Number(detail.regimeFactor || 1).toFixed(2)}</td>
+                        <td>${Number(detail.score || 0).toFixed(2)}</td>
+                    </tr>
+                `).join('')
+                : '<tr><td colspan="7" class="table-empty">Eski sinyalde katkı detayı bulunmuyor.</td></tr>';
+
+            const opponents = diagnostics.opposingDetails || [];
+            document.getElementById('signal-opponents-body').innerHTML = opponents.length
+                ? opponents.map(detail => `
+                    <tr>
+                        <td>${this.escapeHtml(STRATEGY_LABELS[detail.strategy] || detail.strategy)}</td>
+                        <td>${String(detail.direction || '').toUpperCase()}</td>
+                        <td>${this.escapeHtml(detail.evidenceFamily || '—')}</td>
+                        <td>${this.escapeHtml(detail.reason || '—')}</td>
+                        <td>${Number(detail.score || 0).toFixed(2)}</td>
+                    </tr>
+                `).join('')
+                : '<tr><td colspan="5" class="table-empty">Karşıt oy yok.</td></tr>';
+            document.getElementById('signal-detail-dialog').showModal();
         }
 
         renderStats() {
@@ -1296,10 +1386,17 @@
             this.setInput('setting-evaluation-delay', signalSafety.evaluationDelayMs);
             this.setInput('setting-score-lead', signalSafety.minScoreLead);
             this.setInput('setting-confirmations', signalSafety.minConfirmations);
+            this.setInput('setting-independent-families', signalSafety.minIndependentFamilies);
+            this.setInput('setting-family-cap', signalSafety.maxFamilyContributionRatio);
+            this.setInput('setting-conviction-windows', signalSafety.minConvictionWindows);
+            this.setInput('setting-reversal-windows', signalSafety.minReversalConvictionWindows);
+            this.setInput('setting-reverse-hysteresis', signalSafety.reverseHysteresisPoints);
+            this.setInput('setting-reversal-atr', signalSafety.reversalAtrInvalidation);
             this.setInput('setting-opposite-lock', signalSafety.oppositeSignalLockMs);
             this.setInput('setting-reversal-confirmations', signalSafety.minReversalConfirmations);
             this.setInput('setting-reversal-multiplier', signalSafety.reversalScoreMultiplier);
             document.getElementById('setting-active-lock').checked = signalSafety.preventSignalsWhileActive;
+            document.getElementById('setting-reversal-close').checked = signalSafety.requireClosedCandleForReversal;
             this.setInput('setting-learning-min-samples', learning.minSamples);
             this.setInput('setting-learning-every', learning.optimizeEvery);
             this.setInput('setting-shadow-influence', learning.shadowInfluence);
@@ -1343,10 +1440,21 @@
                     evaluationDelayMs: evaluationDelay,
                     minScoreLead: number('setting-score-lead', 2, 0, 20),
                     minConfirmations: number('setting-confirmations', 2, 1, 10),
+                    minIndependentFamilies: number('setting-independent-families', 2, 1, 4),
+                    maxFamilyContributionRatio: number('setting-family-cap', 0.60, 0.25, 1),
                     preventSignalsWhileActive: document.getElementById('setting-active-lock').checked,
                     oppositeSignalLockMs: number('setting-opposite-lock', 120000, 0, 3600000),
                     minReversalConfirmations: number('setting-reversal-confirmations', 2, 1, 10),
                     reversalScoreMultiplier: number('setting-reversal-multiplier', 1.25, 1, 5),
+                    reverseHysteresisPoints: number('setting-reverse-hysteresis', 2, 0, 20),
+                    minConvictionWindows: number('setting-conviction-windows', 2, 1, 10),
+                    minReversalConvictionWindows: number('setting-reversal-windows', 3, 1, 10),
+                    minConvictionMs: this.settings.signalSafety.minConvictionMs ?? 600,
+                    minReversalConvictionMs: this.settings.signalSafety.minReversalConvictionMs ?? 1200,
+                    convictionWindowMs: this.settings.signalSafety.convictionWindowMs ?? 700,
+                    convictionAlpha: this.settings.signalSafety.convictionAlpha ?? 0.35,
+                    reversalAtrInvalidation: number('setting-reversal-atr', 0.5, 0, 5),
+                    requireClosedCandleForReversal: document.getElementById('setting-reversal-close').checked,
                     blockedNoticeThrottleMs: 10000
                 },
                 learning: {
@@ -1384,10 +1492,12 @@
         renderSafetyChips() {
             const safety = this.settings.signalSafety;
             document.getElementById('safety-chips').innerHTML = [
-                `${safety.minConfirmations} bağımsız teyit`,
+                `${safety.minConfirmations} strateji / ${safety.minIndependentFamilies} aile`,
+                `${safety.minConvictionWindows} pencere kararlılık`,
                 `${safety.minScoreLead} puan skor farkı`,
                 `${Math.round(safety.oppositeSignalLockMs / 1000)} sn ters kilit`,
-                `×${safety.reversalScoreMultiplier} ters skor`
+                `+${safety.reverseHysteresisPoints} ters histerezis`,
+                `${safety.reversalAtrInvalidation} ATR geçersizlik`
             ].map(text => `<span>${this.escapeHtml(text)}</span>`).join('');
         }
 
@@ -1395,7 +1505,8 @@
             if (!this.adaptiveLearning) return;
             const summary = this.adaptiveLearning.getSummary();
             document.getElementById('learning-mode').value = summary.mode;
-            document.getElementById('learning-regime').textContent = summary.regime.replace(':', ' · ');
+            const adxText = summary.adx === null || summary.adx === undefined ? '' : ` · ADX ${summary.adx.toFixed(1)}`;
+            document.getElementById('learning-regime').textContent = `${summary.regime.replace(':', ' · ')}${adxText}`;
             document.getElementById('learning-live-count').textContent = Math.round(summary.totalLive);
             document.getElementById('learning-shadow-count').textContent = Math.round(summary.totalShadow);
             document.getElementById('learning-active-shadow').textContent = summary.activeShadowTrades;

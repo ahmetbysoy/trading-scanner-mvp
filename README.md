@@ -19,6 +19,11 @@ Scanner artık `src/adaptive-learning.js` üzerinden sınırlandırılmış bir 
 - Mikro-yapı stratejilerinin cooldown değerleri kayıp serisi, R beklentisi ve güvenilirliğe göre yavaşça optimize edilir.
 - Mum tabanlı stratejiler aynı kapanmış mumda yalnızca bir teklif verebilir.
 - Global ve ters yön cooldown korumaları yalnızca güvenli yönde ayarlanır; hard sinyal kilitleri optimizer tarafından kapatılamaz.
+- Conviction state machine yön baskısının birden fazla zaman penceresinde kalıcı olmasını ister.
+- Minimum iki farklı strateji ailesi gerekir ve tek ailenin toplam skora katkısı `%60` ile sınırlanır.
+- Ters sinyal için ek skor histerezisi ve `0.5 ATR` fiyat geçersizliği uygulanır.
+- Gerçek Wilder ADX, yön ve volatiliteyle rejim güveni hesaplanır; aile boost/cezaları en fazla `%8` ile sınırlıdır.
+- Sinyal satırına tıklanınca temel skor, öğrenme ağırlığı, rejim katsayısı, etkin katkı ve karşıt oylar görüntülenir.
 - Strateji ikililerinin ortak sonuçları gelecekteki kombinasyon optimizasyonu için kaydedilir.
 - Veriler tarayıcıdaki IndexedDB'de saklanır ve panelden JSON olarak dışa aktarılabilir.
 

@@ -126,6 +126,9 @@
         constructor(bot) {
             this.bot = bot;
             this.current = 'unknown:normal';
+            this.adx = null;
+            this.confidence = 0;
+            this.volatility = 'normal';
         }
 
         detect() {
@@ -140,20 +143,73 @@
             const previousSma20 = mean(previous20);
             const atr = Number(this.bot.indicators && this.bot.indicators.atr) || 0;
             const price = closes.at(-1) || 1;
-            const normalizedSpread = Math.abs(sma20 - sma50) / Math.max(atr, price * 0.0001);
-            const slope = (sma20 - previousSma20) / Math.max(atr, price * 0.0001);
+            const normalizedSlope = (sma20 - previousSma20) / Math.max(atr, price * 0.0001);
+            this.adx = this.calculateAdx(candles, 14);
 
+            // 20/23 Schmitt bandı rejimin eşik çevresinde her ölçümde flip
+            // etmesini engeller.
+            const wasTrending = this.current.startsWith('trend-');
+            const trendThreshold = wasTrending ? 20 : 23;
             let trend = 'range';
-            if (sma20 > sma50 && slope > 0.2 && normalizedSpread > 0.45) trend = 'trend-up';
-            else if (sma20 < sma50 && slope < -0.2 && normalizedSpread > 0.45) trend = 'trend-down';
+            if (this.adx !== null && this.adx >= trendThreshold) {
+                if (sma20 > sma50 && normalizedSlope > 0.1) trend = 'trend-up';
+                else if (sma20 < sma50 && normalizedSlope < -0.1) trend = 'trend-down';
+            }
 
             const atrPercent = atr / Math.max(price, EPSILON);
-            let volatility = 'normal';
-            if (atrPercent < 0.0025) volatility = 'low-vol';
-            else if (atrPercent > 0.012) volatility = 'high-vol';
-
-            this.current = `${trend}:${volatility}`;
+            this.volatility = atrPercent < 0.0025
+                ? 'low-vol'
+                : atrPercent > 0.012
+                    ? 'high-vol'
+                    : 'normal';
+            this.confidence = trend === 'range'
+                ? clamp((23 - (this.adx || 0)) / 15, 0.15, 1)
+                : clamp(((this.adx || 23) - 18) / 22, 0.15, 1);
+            this.current = `${trend}:${this.volatility}`;
             return this.current;
+        }
+
+        calculateAdx(candles, period = 14) {
+            if (!Array.isArray(candles) || candles.length < period * 2 + 1) return null;
+            const tr = [];
+            const plusDm = [];
+            const minusDm = [];
+            for (let i = 1; i < candles.length; i += 1) {
+                const current = candles[i];
+                const previous = candles[i - 1];
+                const upMove = current.high - previous.high;
+                const downMove = previous.low - current.low;
+                tr.push(Math.max(
+                    current.high - current.low,
+                    Math.abs(current.high - previous.close),
+                    Math.abs(current.low - previous.close)
+                ));
+                plusDm.push(upMove > downMove && upMove > 0 ? upMove : 0);
+                minusDm.push(downMove > upMove && downMove > 0 ? downMove : 0);
+            }
+
+            let smoothTr = tr.slice(0, period).reduce((sum, value) => sum + value, 0);
+            let smoothPlus = plusDm.slice(0, period).reduce((sum, value) => sum + value, 0);
+            let smoothMinus = minusDm.slice(0, period).reduce((sum, value) => sum + value, 0);
+            const dxValues = [];
+            const appendDx = () => {
+                const plusDi = 100 * smoothPlus / Math.max(smoothTr, EPSILON);
+                const minusDi = 100 * smoothMinus / Math.max(smoothTr, EPSILON);
+                dxValues.push(100 * Math.abs(plusDi - minusDi) / Math.max(plusDi + minusDi, EPSILON));
+            };
+            appendDx();
+            for (let i = period; i < tr.length; i += 1) {
+                smoothTr = smoothTr - smoothTr / period + tr[i];
+                smoothPlus = smoothPlus - smoothPlus / period + plusDm[i];
+                smoothMinus = smoothMinus - smoothMinus / period + minusDm[i];
+                appendDx();
+            }
+            if (dxValues.length < period) return mean(dxValues);
+            let adx = mean(dxValues.slice(0, period));
+            for (let i = period; i < dxValues.length; i += 1) {
+                adx = (adx * (period - 1) + dxValues[i]) / period;
+            }
+            return round(adx, 2);
         }
     }
 
@@ -587,6 +643,22 @@
             };
         }
 
+        getRegimeFactor(evidenceFamily) {
+            if (this.state.mode !== 'auto') return 1;
+            const confidence = this.regimeDetector.confidence || 0;
+            const trend = this.currentRegime.split(':')[0];
+            let factor = 1;
+            if (trend === 'range') {
+                if (evidenceFamily === 'mean-reversion') factor += 0.08 * confidence;
+                if (evidenceFamily === 'momentum') factor -= 0.05 * confidence;
+            } else if (trend === 'trend-up' || trend === 'trend-down') {
+                if (evidenceFamily === 'momentum') factor += 0.08 * confidence;
+                if (evidenceFamily === 'structure') factor += 0.05 * confidence;
+                if (evidenceFamily === 'mean-reversion') factor -= 0.05 * confidence;
+            }
+            return round(clamp(factor, 0.92, 1.08), 3);
+        }
+
         getWeight(strategy, context = this.getContext()) {
             if (this.state.mode !== 'auto') return 1;
             const localValue = Number(this.state.weights[this.policyKey(strategy, context)]);
@@ -658,6 +730,8 @@
             return {
                 mode: this.state.mode,
                 regime: this.currentRegime,
+                adx: this.regimeDetector.adx,
+                regimeConfidence: this.regimeDetector.confidence,
                 totalLive,
                 totalShadow,
                 activeShadowTrades: this.state.shadowTrades.filter(trade => trade.status === 'active').length,

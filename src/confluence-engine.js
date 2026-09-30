@@ -34,6 +34,7 @@
             this._evaluationTimer = null;
             this._signalSequence = 0;
             this._lastBlockedNotice = new Map();
+            this._convictionBySymbol = new Map();
         }
 
         propose(strategy, direction, reason, score, metadata = {}) {
@@ -60,9 +61,11 @@
                 score: numericScore,
                 baseScore: Number(metadata.baseScore) || numericScore,
                 adaptiveWeight: Number(metadata.adaptiveWeight) || 1,
+                regimeFactor: Number(metadata.regimeFactor) || 1,
                 context: metadata.context || null,
                 regime: metadata.regime || null,
                 family: metadata.family || null,
+                evidenceFamily: metadata.evidenceFamily || 'other',
                 timeframe: metadata.timeframe || this.bot.currentTimeframe || null,
                 timestamp: now
             });
@@ -72,10 +75,11 @@
             return true;
         }
 
-        _scheduleEvaluation() {
+        _scheduleEvaluation(delayOverride = null) {
             if (this._evaluationTimer !== null) return;
 
-            const delay = this._getSafetySettings().evaluationDelayMs;
+            const configuredDelay = this._getSafetySettings().evaluationDelayMs;
+            const delay = delayOverride === null ? configuredDelay : Math.max(0, Number(delayOverride) || 0);
             this._evaluationTimer = this._setTimeout(() => {
                 this._evaluationTimer = null;
                 this.checkConfluence();
@@ -100,16 +104,22 @@
             this._pruneExpired(now);
 
             const proposals = this.proposals.filter(proposal => proposal.symbol === symbol);
-            if (proposals.length === 0) return { status: 'empty' };
+            if (proposals.length === 0) {
+                this._resetConviction(symbol);
+                return { status: 'empty' };
+            }
 
+            const safety = this._getSafetySettings();
             const buyProposals = proposals.filter(proposal => proposal.direction === 'buy');
             const sellProposals = proposals.filter(proposal => proposal.direction === 'sell');
-            const buyScore = this._sumScores(buyProposals);
-            const sellScore = this._sumScores(sellProposals);
+            const buyBreakdown = this._scoreDirection(buyProposals, safety.maxFamilyContributionRatio);
+            const sellBreakdown = this._scoreDirection(sellProposals, safety.maxFamilyContributionRatio);
+            const buyScore = buyBreakdown.cappedScore;
+            const sellScore = sellBreakdown.cappedScore;
             const threshold = this._getThreshold();
-            const safety = this._getSafetySettings();
 
-            if (buyScore === sellScore) {
+            if (Math.abs(buyScore - sellScore) < 1e-9) {
+                this._resetConviction(symbol);
                 return { status: 'conflict', buyScore, sellScore, reason: 'equal-score' };
             }
 
@@ -117,14 +127,19 @@
             const candidateScore = direction === 'buy' ? buyScore : sellScore;
             const opposingScore = direction === 'buy' ? sellScore : buyScore;
             const candidateProposals = direction === 'buy' ? buyProposals : sellProposals;
+            const opposingProposals = direction === 'buy' ? sellProposals : buyProposals;
+            const candidateBreakdown = direction === 'buy' ? buyBreakdown : sellBreakdown;
+            const opposingBreakdown = direction === 'buy' ? sellBreakdown : buyBreakdown;
             const scoreLead = candidateScore - opposingScore;
 
             if (candidateScore < threshold) {
+                this._resetConviction(symbol);
                 return { status: 'below-threshold', direction, score: candidateScore, threshold };
             }
 
             // BUY 5 / SELL 4 gibi çatışmalı bir tabloyu "güçlü 5" diye yayınlama.
             if (scoreLead < safety.minScoreLead) {
+                this._resetConviction(symbol);
                 return {
                     status: 'conflict',
                     direction,
@@ -136,14 +151,23 @@
 
             const confirmationCount = this._uniqueStrategyCount(candidateProposals);
             if (confirmationCount < safety.minConfirmations) {
-                // Teklifi tüketme: aynı proposalTimeout penceresinde başka bağımsız
-                // bir strateji gelirse mevcut oyla birlikte tekrar değerlendirilsin.
                 return {
                     status: 'awaiting-confirmation',
                     direction,
                     score: candidateScore,
                     confirmations: confirmationCount,
                     requiredConfirmations: safety.minConfirmations
+                };
+            }
+
+            const independentFamilies = this._uniqueFamilyCount(candidateProposals);
+            if (independentFamilies < safety.minIndependentFamilies) {
+                return {
+                    status: 'awaiting-family-diversity',
+                    direction,
+                    score: candidateScore,
+                    families: independentFamilies,
+                    requiredFamilies: safety.minIndependentFamilies
                 };
             }
 
@@ -170,7 +194,7 @@
                 return this._block(symbol, direction, 'Aynı yön sinyal cooldown süresi devam ediyor.', now, 'same-direction-cooldown');
             }
 
-            const isReversal = latestSignal && latestSignal.direction !== direction;
+            const isReversal = Boolean(latestSignal && latestSignal.direction !== direction);
             if (isReversal) {
                 const reversalAge = now - latestSignal.timestamp;
                 if (reversalAge < safety.oppositeSignalLockMs) {
@@ -193,6 +217,17 @@
                     );
                 }
 
+                const requiredReverseLead = safety.minScoreLead + safety.reverseHysteresisPoints;
+                if (scoreLead < requiredReverseLead) {
+                    return this._block(
+                        symbol,
+                        direction,
+                        `Ters sinyal skor farkı yetersiz (${scoreLead.toFixed(2)}/${requiredReverseLead}).`,
+                        now,
+                        'insufficient-reversal-hysteresis'
+                    );
+                }
+
                 const previousScore = Number(latestSignal.score) || 0;
                 const requiredReversalScore = Math.max(
                     threshold,
@@ -203,25 +238,70 @@
                     return this._block(
                         symbol,
                         direction,
-                        `Ters sinyal skoru yetersiz (${candidateScore}/${requiredReversalScore}).`,
+                        `Ters sinyal skoru yetersiz (${candidateScore.toFixed(2)}/${requiredReversalScore}).`,
                         now,
                         'insufficient-reversal-score'
                     );
                 }
+
+                if (!this._isReversalPriceInvalidated(latestSignal, direction, price, safety)) {
+                    return this._block(
+                        symbol,
+                        direction,
+                        `Önceki ${latestSignal.direction.toUpperCase()} tezi ATR/mum kapanışıyla geçersiz olmadı.`,
+                        now,
+                        'reversal-price-not-invalidated'
+                    );
+                }
+            }
+
+            const conviction = this._updateConviction(
+                symbol,
+                direction,
+                buyScore - sellScore,
+                now,
+                isReversal,
+                safety
+            );
+            if (!conviction.ready) {
+                this._scheduleEvaluation(Math.max(50, safety.convictionWindowMs));
+                return {
+                    status: 'building-conviction',
+                    direction,
+                    score: candidateScore,
+                    windows: conviction.windows,
+                    requiredWindows: conviction.requiredWindows,
+                    elapsedMs: conviction.elapsedMs,
+                    requiredMs: conviction.requiredMs,
+                    smoothedPressure: conviction.smoothedPressure
+                };
             }
 
             return this.generateFinalSignal(direction, candidateProposals, {
                 buyScore,
                 sellScore,
+                rawBuyScore: buyBreakdown.rawScore,
+                rawSellScore: sellBreakdown.rawScore,
+                candidateScore,
                 opposingScore,
                 scoreLead,
-                isReversal: Boolean(isReversal)
+                isReversal,
+                independentFamilies,
+                familyScores: candidateBreakdown.familyScores,
+                opposingFamilyScores: opposingBreakdown.familyScores,
+                opposingDetails: opposingProposals.map(proposal => this._proposalDiagnostic(proposal)),
+                conviction: {
+                    windows: conviction.windows,
+                    elapsedMs: conviction.elapsedMs,
+                    smoothedPressure: conviction.smoothedPressure
+                }
             });
         }
 
         generateFinalSignal(direction, proposals, diagnostics = {}) {
             const now = this._now();
-            const totalScore = this._sumScores(proposals);
+            const rawScore = this._sumScores(proposals);
+            const totalScore = Number(diagnostics.candidateScore) || rawScore;
             const strategyNames = proposals.map(proposal => {
                 const strategy = this.bot.strategies && this.bot.strategies[proposal.strategy];
                 return strategy && strategy.displayName ? strategy.displayName : proposal.strategy;
@@ -237,7 +317,8 @@
                 regime: proposals[0]?.regime || null,
                 direction,
                 price: Number(this.bot.marketData.price),
-                score: totalScore,
+                score: Math.round(totalScore * 100) / 100,
+                rawScore: Math.round(rawScore * 100) / 100,
                 confirmations: uniqueStrategyNames.length,
                 reason: uniqueStrategyNames.join(', '),
                 details: proposals.map(proposal => ({
@@ -246,9 +327,11 @@
                     score: proposal.score,
                     baseScore: proposal.baseScore,
                     adaptiveWeight: proposal.adaptiveWeight,
+                    regimeFactor: proposal.regimeFactor,
                     context: proposal.context,
                     regime: proposal.regime,
-                    family: proposal.family
+                    family: proposal.family,
+                    evidenceFamily: proposal.evidenceFamily
                 })),
                 diagnostics,
                 status: 'active',
@@ -261,6 +344,7 @@
             // Sinyal sonrasında iki yöndeki tüm teklifler temizlenir. Böylece önceki
             // karar penceresinden kalan karşıt oy bir sonraki sinyali tetiklemez.
             this.clearProposals(signal.symbol);
+            this._resetConviction(signal.symbol);
             this.lastSignalTime = now;
             this.lastSignalTimeByDirection[direction] = now;
 
@@ -281,6 +365,8 @@
                 this._evaluationTimer = null;
             }
             this.clearProposals(symbol);
+            if (symbol) this._resetConviction(symbol);
+            else this._convictionBySymbol.clear();
             this._lastBlockedNotice.clear();
         }
 
@@ -299,6 +385,123 @@
 
         _uniqueStrategyCount(proposals) {
             return new Set(proposals.map(proposal => proposal.strategy)).size;
+        }
+
+        _uniqueFamilyCount(proposals) {
+            return new Set(proposals.map(proposal => proposal.evidenceFamily || 'other')).size;
+        }
+
+        _scoreDirection(proposals, maxFamilyRatio) {
+            const rawScore = this._sumScores(proposals);
+            const familyScores = proposals.reduce((scores, proposal) => {
+                const family = proposal.evidenceFamily || 'other';
+                scores[family] = (scores[family] || 0) + proposal.score;
+                return scores;
+            }, {});
+            if (!rawScore) return { rawScore: 0, cappedScore: 0, familyScores };
+
+            const ratio = Math.min(1, Math.max(0.25, Number(maxFamilyRatio) || 1));
+            const cap = rawScore * ratio;
+            const cappedScore = Object.values(familyScores)
+                .reduce((sum, familyScore) => sum + Math.min(familyScore, cap), 0);
+            return {
+                rawScore: Math.round(rawScore * 100) / 100,
+                cappedScore: Math.round(cappedScore * 100) / 100,
+                familyScores
+            };
+        }
+
+        _proposalDiagnostic(proposal) {
+            return {
+                strategy: proposal.strategy,
+                direction: proposal.direction,
+                reason: proposal.reason,
+                score: proposal.score,
+                baseScore: proposal.baseScore,
+                adaptiveWeight: proposal.adaptiveWeight,
+                regimeFactor: proposal.regimeFactor,
+                evidenceFamily: proposal.evidenceFamily
+            };
+        }
+
+        _updateConviction(symbol, direction, pressure, now, isReversal, safety) {
+            const previous = this._convictionBySymbol.get(symbol);
+            const alpha = Math.min(1, Math.max(0.05, safety.convictionAlpha));
+            const smoothedPressure = previous
+                ? alpha * pressure + (1 - alpha) * previous.smoothedPressure
+                : pressure;
+            const requiredPressure = safety.minScoreLead + (isReversal ? safety.reverseHysteresisPoints : 0);
+            const supportsDirection = direction === 'buy'
+                ? smoothedPressure >= requiredPressure
+                : smoothedPressure <= -requiredPressure;
+
+            let state;
+            if (!previous || previous.direction !== direction || !supportsDirection) {
+                state = {
+                    direction,
+                    windows: supportsDirection ? 1 : 0,
+                    firstSeen: now,
+                    lastWindowAt: now,
+                    smoothedPressure
+                };
+            } else {
+                const canCountWindow = now - previous.lastWindowAt >= safety.convictionWindowMs;
+                state = {
+                    ...previous,
+                    windows: previous.windows + (canCountWindow ? 1 : 0),
+                    lastWindowAt: canCountWindow ? now : previous.lastWindowAt,
+                    smoothedPressure
+                };
+            }
+            this._convictionBySymbol.set(symbol, state);
+
+            const requiredWindows = isReversal
+                ? safety.minReversalConvictionWindows
+                : safety.minConvictionWindows;
+            const requiredMs = isReversal
+                ? safety.minReversalConvictionMs
+                : safety.minConvictionMs;
+            const elapsedMs = now - state.firstSeen;
+            return {
+                ...state,
+                elapsedMs,
+                requiredWindows,
+                requiredMs,
+                ready: supportsDirection && state.windows >= requiredWindows && elapsedMs >= requiredMs
+            };
+        }
+
+        _resetConviction(symbol) {
+            if (symbol) this._convictionBySymbol.delete(symbol);
+        }
+
+        _isReversalPriceInvalidated(latestSignal, newDirection, currentPrice, safety) {
+            if (!latestSignal || latestSignal.status === 'sl') return true;
+            if (safety.reversalAtrInvalidation <= 0) return true;
+
+            const atr = Number(this.bot.indicators && this.bot.indicators.atr);
+            const distance = (Number.isFinite(atr) && atr > 0 ? atr : currentPrice * 0.003)
+                * safety.reversalAtrInvalidation;
+            const referenceCandidate = Number(latestSignal.closedPrice);
+            const reference = Number.isFinite(referenceCandidate) && referenceCandidate > 0
+                ? referenceCandidate
+                : Number(latestSignal.price);
+            if (!Number.isFinite(reference) || reference <= 0) return false;
+
+            let observedPrice = currentPrice;
+            if (safety.requireClosedCandleForReversal && typeof this.bot.getClosedCandles === 'function') {
+                const close = Number(this.bot.getClosedCandles().at(-1)?.close);
+                if (!Number.isFinite(close)) return false;
+                observedPrice = close;
+            }
+
+            if (latestSignal.direction === 'buy' && newDirection === 'sell') {
+                return observedPrice <= reference - distance;
+            }
+            if (latestSignal.direction === 'sell' && newDirection === 'buy') {
+                return observedPrice >= reference + distance;
+            }
+            return true;
         }
 
         _getThreshold() {
@@ -335,10 +538,21 @@
                 // Böylece tek bir stratejinin ağırlığı olan 5, yanlışlıkla beş ayrı
                 // teyit gibi sunulmaz.
                 minConfirmations: Math.max(1, Math.floor(this._nonNegative(configured.minConfirmations, 2))),
+                minIndependentFamilies: Math.max(1, Math.floor(this._nonNegative(configured.minIndependentFamilies, 1))),
+                maxFamilyContributionRatio: Math.min(1, Math.max(0.25, this._nonNegative(configured.maxFamilyContributionRatio, 1))),
                 preventSignalsWhileActive: configured.preventSignalsWhileActive !== false,
                 oppositeSignalLockMs,
                 minReversalConfirmations: Math.max(1, Math.floor(this._nonNegative(configured.minReversalConfirmations, 2))),
                 reversalScoreMultiplier: Math.max(1, this._nonNegative(configured.reversalScoreMultiplier, 1.25)),
+                reverseHysteresisPoints: this._nonNegative(configured.reverseHysteresisPoints, 0),
+                minConvictionWindows: Math.max(1, Math.floor(this._nonNegative(configured.minConvictionWindows, 1))),
+                minReversalConvictionWindows: Math.max(1, Math.floor(this._nonNegative(configured.minReversalConvictionWindows, 1))),
+                minConvictionMs: this._nonNegative(configured.minConvictionMs, 0),
+                minReversalConvictionMs: this._nonNegative(configured.minReversalConvictionMs, 0),
+                convictionWindowMs: this._nonNegative(configured.convictionWindowMs, 0),
+                convictionAlpha: Math.min(1, Math.max(0.05, this._nonNegative(configured.convictionAlpha, 0.35))),
+                reversalAtrInvalidation: this._nonNegative(configured.reversalAtrInvalidation, 0),
+                requireClosedCandleForReversal: configured.requireClosedCandleForReversal === true,
                 blockedNoticeThrottleMs: this._nonNegative(configured.blockedNoticeThrottleMs, 10000)
             };
         }
@@ -367,6 +581,7 @@
             // Engellenen teklifleri tüket. Aktif işlem kapanınca birkaç saniye önceki
             // bayat karşıt teklifin aniden sinyale dönüşmesini istemiyoruz.
             this.clearProposals(symbol);
+            this._resetConviction(symbol);
             if (this.bot.eventBus && typeof this.bot.eventBus.emit === 'function') {
                 this.bot.eventBus.emit('signal.blocked', { symbol, direction, reason, message, timestamp: now });
             }
