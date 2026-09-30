@@ -6,6 +6,20 @@ Bu repo, paylaşılan tarayıcı tabanlı scanner'daki **birkaç saniye içinde 
 
 > Bu yazılım yatırım tavsiyesi vermez. Canlı hesapta kullanmadan önce paper trading ve geçmiş veri üzerinde test edilmelidir.
 
+## Mobil uygulama deneyimi
+
+720px ve altındaki ekranlarda masaüstü dashboard'u üst üste yığmak yerine ayrı bir mobil uygulama kabuğu açılır:
+
+- **Ana Sayfa:** piyasa seçimi, sistem yaşam döngüsü, canlı metrikler ve güvenlik özeti
+- **Piyasa:** tam ekran grafik / emir defteri ısı haritası ve dokunmatik zoom
+- **Sinyaller:** aktif pozisyon kilidi, geçmiş, sonuçlar ve katkı detayı
+- **Öğrenme:** live/shadow ölçümleri, rejim ve adaptif ağırlıklar
+- **Ayarlar:** mobilde tam ekran güvenlik, cooldown, öğrenme ve strateji ayarları
+
+Üst canlı ticker ve alt navigasyon sabittir; iOS/Android güvenli alanları hesaba katılır. Son mobil ekran ile grafik/heatmap seçimi cihazda saklanır. `manifest.webmanifest` ve `sw.js` sayesinde desteklenen tarayıcılarda ana ekrana bağımsız uygulama olarak kurulabilir. Masaüstü düzeni 720px üstünde korunur.
+
+Kono kaynak incelemesindeki “kullan / uyarla / reddet” kararları için [`docs/kono-mobile-analysis.md`](docs/kono-mobile-analysis.md) belgesine bakın.
+
 ## Adaptif hibrit öğrenme
 
 Scanner artık `src/adaptive-learning.js` üzerinden sınırlandırılmış bir öğrenme katmanı kullanır:

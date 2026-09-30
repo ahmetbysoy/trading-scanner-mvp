@@ -6,7 +6,9 @@
         signals: 'utc_signals',
         symbol: 'utc_current_symbol',
         timeframe: 'utc_current_timeframe',
-        theme: 'utc_theme'
+        theme: 'utc_theme',
+        mobileView: 'utc_mobile_view',
+        visualView: 'utc_visual_view'
     };
 
     const STRATEGY_LABELS = {
@@ -654,6 +656,10 @@
 
             this.currentSymbol = this.loadData(STORAGE.symbol) || 'BTCUSDT';
             this.currentTimeframe = this.loadData(STORAGE.timeframe) || '15m';
+            const savedMobileView = this.loadData(STORAGE.mobileView);
+            this.mobileView = ['home', 'market', 'signals', 'learning'].includes(savedMobileView) ? savedMobileView : 'home';
+            this.visualView = this.loadData(STORAGE.visualView) === 'heatmap' ? 'heatmap' : 'chart';
+            document.body.dataset.mobileView = this.mobileView;
             this.settings = this.loadSettings();
             this.signals = this.loadData(STORAGE.signals) || [];
             this.candles = [];
@@ -681,6 +687,8 @@
             this.bindLearningEvents();
             this.bindEvents();
             this.syncControls();
+            this.setMobileView(this.mobileView, { persist: false, scroll: false });
+            this.switchView(this.visualView, { persist: false });
             this.renderAll();
             this.renderSafetyChips();
             this.renderLearning();
@@ -820,6 +828,15 @@
             document.getElementById('stop-btn').addEventListener('click', () => this.stop());
             document.getElementById('theme-btn').addEventListener('click', () => this.toggleTheme());
             document.getElementById('settings-btn').addEventListener('click', () => this.openSettings());
+            document.querySelectorAll('#mobile-tabbar [data-mobile-view]').forEach(tab => {
+                tab.addEventListener('click', () => this.setMobileView(tab.dataset.mobileView));
+            });
+            document.getElementById('mobile-settings-tab').addEventListener('click', event => {
+                event.currentTarget.classList.add('active');
+                event.currentTarget.setAttribute('aria-selected', 'true');
+                this.openSettings();
+            });
+            document.getElementById('settings-dialog').addEventListener('close', () => this.syncMobileTabs());
             document.getElementById('clear-signals-btn').addEventListener('click', () => this.clearSignals());
             document.getElementById('signals-body').addEventListener('click', event => {
                 const row = event.target.closest ? event.target.closest('[data-signal-id]') : null;
@@ -856,6 +873,9 @@
                 if (this.isRunning && (!this.socket || this.socket.readyState > 1)) this.connectWebSocket(true);
             });
             window.addEventListener('offline', () => this.updateConnection(false, 'İNTERNET YOK'));
+            window.addEventListener('resize', () => {
+                if (this.mobileView === 'market') this.resizeActiveVisual();
+            });
             window.addEventListener('beforeunload', () => this.disconnectWebSocket());
         }
 
@@ -1248,6 +1268,10 @@
 
         renderSignals() {
             const body = document.getElementById('signals-body');
+            const activeCount = this.signals.filter(signal => signal.status === 'active').length;
+            const mobileBadge = document.getElementById('mobile-signal-badge');
+            mobileBadge.textContent = activeCount > 9 ? '9+' : String(activeCount);
+            mobileBadge.hidden = activeCount === 0;
             if (!this.signals.length) {
                 body.innerHTML = '<tr><td colspan="6" class="table-empty">Henüz sinyal yok.</td></tr>';
                 return;
@@ -1350,21 +1374,55 @@
             document.getElementById('connection-text').textContent = text;
         }
 
-        switchView(view) {
-            const chart = view === 'chart';
+        setMobileView(view, options = {}) {
+            const labels = {
+                home: 'Ana Sayfa',
+                market: 'Piyasa',
+                signals: 'Sinyaller',
+                learning: 'Öğrenme'
+            };
+            if (!labels[view]) return;
+            this.mobileView = view;
+            document.body.dataset.mobileView = view;
+            document.getElementById('mobile-page-title').textContent = labels[view];
+            this.syncMobileTabs();
+            if (options.persist !== false) this.saveData(STORAGE.mobileView, view);
+
+            const shell = document.querySelector('.app-shell');
+            if (options.scroll !== false && shell && typeof shell.scrollTo === 'function') {
+                shell.scrollTo({ top: 0, behavior: 'auto' });
+            }
+            if (view === 'market') requestAnimationFrame(() => this.resizeActiveVisual());
+        }
+
+        syncMobileTabs() {
+            document.querySelectorAll('#mobile-tabbar .mobile-tab').forEach(tab => {
+                const active = tab.dataset.mobileView === this.mobileView;
+                tab.classList.toggle('active', active);
+                tab.setAttribute('aria-selected', String(active));
+            });
+        }
+
+        resizeActiveVisual() {
+            if (this.visualView === 'heatmap') {
+                this.heatmapManager.resize();
+                this.heatmapManager.draw(this.orderBook, this.marketData.price);
+            } else {
+                this.chartManager.resize();
+            }
+        }
+
+        switchView(view, options = {}) {
+            const chart = view !== 'heatmap';
+            this.visualView = chart ? 'chart' : 'heatmap';
             document.getElementById('chart-view').classList.toggle('active', chart);
             document.getElementById('chart-view').hidden = !chart;
             document.getElementById('heatmap-view').classList.toggle('active', !chart);
             document.getElementById('heatmap-view').hidden = chart;
             document.getElementById('chart-view-btn').classList.toggle('active', chart);
             document.getElementById('heatmap-view-btn').classList.toggle('active', !chart);
-            requestAnimationFrame(() => {
-                if (chart) this.chartManager.resize();
-                else {
-                    this.heatmapManager.resize();
-                    this.heatmapManager.draw(this.orderBook, this.marketData.price);
-                }
-            });
+            if (options.persist !== false) this.saveData(STORAGE.visualView, this.visualView);
+            requestAnimationFrame(() => this.resizeActiveVisual());
         }
 
         openSettings() {
@@ -1662,6 +1720,11 @@
     window.addEventListener('DOMContentLoaded', () => {
         try {
             window.app = new TradingScannerApp();
+            if ('serviceWorker' in navigator && window.isSecureContext) {
+                navigator.serviceWorker.register('./sw.js?v=1').catch(error => {
+                    console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
+                });
+            }
         } catch (error) {
             console.error('Uygulama başlatılamadı:', error);
             document.body.innerHTML = `<main style="padding:32px;font-family:monospace;color:#ff5f6d">Uygulama başlatılamadı: ${String(error.message || error)}</main>`;

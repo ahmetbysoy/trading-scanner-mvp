@@ -2,28 +2,37 @@
 <html lang="tr" data-theme="dark">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="description" content="Çoklu strateji teyitli, ters sinyal korumalı canlı kripto vadeli işlem tarayıcısı.">
+    <meta name="theme-color" content="#070a0f">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="UTC Scanner">
     <title>Ultimate Trading Komuta Merkezi</title>
+    <link rel="manifest" href="./manifest.webmanifest?v=1">
+    <link rel="icon" href="./icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=4">
+    <link rel="stylesheet" href="./styles.css?v=5">
     <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script defer src="./src/adaptive-learning.js?v=4"></script>
-    <script defer src="./src/confluence-engine.js?v=4"></script>
-    <script defer src="./src/app.js?v=4"></script>
+    <script defer src="./src/adaptive-learning.js?v=5"></script>
+    <script defer src="./src/confluence-engine.js?v=5"></script>
+    <script defer src="./src/app.js?v=5"></script>
 </head>
-<body>
+<body data-mobile-view="home">
     <noscript>Bu uygulamayı kullanmak için JavaScript etkin olmalıdır.</noscript>
 
     <header class="topbar">
         <div class="brand-block">
             <div class="brand-mark" aria-hidden="true">UTC</div>
-            <div>
+            <div class="desktop-brand-copy">
                 <div class="eyebrow">CANLI PİYASA TARAYICI</div>
                 <h1>Komuta Merkezi</h1>
             </div>
+            <span id="mobile-page-title" class="mobile-page-title">Ana Sayfa</span>
         </div>
         <div class="ticker" aria-live="polite">
             <span id="ticker-symbol">BTC/USDT</span>
@@ -37,7 +46,7 @@
     </header>
 
     <main class="app-shell">
-        <section class="control-panel panel" aria-labelledby="controls-title">
+        <section class="control-panel panel mobile-page-home" aria-labelledby="controls-title">
             <div class="panel-heading control-heading">
                 <div>
                     <span class="eyebrow">SİSTEM</span>
@@ -94,7 +103,7 @@
         </section>
 
         <section class="workspace">
-            <section class="market-panel panel">
+            <section class="market-panel panel mobile-page-market">
                 <div class="panel-heading market-heading">
                     <div>
                         <span class="eyebrow">PİYASA GÖRÜNÜMÜ</span>
@@ -128,7 +137,7 @@
                 </div>
             </section>
 
-            <aside class="signals-panel panel" aria-labelledby="signals-title">
+            <aside class="signals-panel panel mobile-page-signals" aria-labelledby="signals-title">
                 <div class="panel-heading">
                     <div>
                         <span class="eyebrow">SİNYAL MOTORU</span>
@@ -170,7 +179,7 @@
             </aside>
         </section>
 
-        <section class="safety-panel panel">
+        <section class="safety-panel panel mobile-page-home">
             <div class="safety-icon" aria-hidden="true">✓</div>
             <div>
                 <span class="eyebrow">TERS SİNYAL KORUMASI AKTİF</span>
@@ -179,7 +188,7 @@
             <div class="safety-chips" id="safety-chips"></div>
         </section>
 
-        <section class="learning-panel panel" aria-labelledby="learning-title">
+        <section class="learning-panel panel mobile-page-learning" aria-labelledby="learning-title">
             <div class="panel-heading learning-heading">
                 <div>
                     <span class="eyebrow">ADAPTİF HİBRİT MOTOR</span>
@@ -234,6 +243,30 @@
             </div>
         </section>
     </main>
+
+    <nav id="mobile-tabbar" class="mobile-tabbar" aria-label="Mobil ana menü">
+        <button class="mobile-tab active" type="button" data-mobile-view="home" aria-selected="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+            <span>Ana Sayfa</span>
+        </button>
+        <button class="mobile-tab" type="button" data-mobile-view="market" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m6 13v-7m5 7V3M2 20h20"/></svg>
+            <span>Piyasa</span>
+        </button>
+        <button class="mobile-tab" type="button" data-mobile-view="signals" aria-selected="false">
+            <span id="mobile-signal-badge" class="mobile-tab-badge" hidden>0</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7m0 0 3 3m-3-3-3 3M19 4v7m0 0 3-3m-3 3-3-3M10 7h4m-4 10h4"/></svg>
+            <span>Sinyaller</span>
+        </button>
+        <button class="mobile-tab" type="button" data-mobile-view="learning" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 5.2A4 4 0 0 0 9 20h1v-6H8m4-11a4 4 0 0 1 4 4v1a3 3 0 0 1 2 5.2A4 4 0 0 1 15 20h-1v-6h2M10 8h4m-4 3h4"/></svg>
+            <span>Öğrenme</span>
+        </button>
+        <button class="mobile-tab" id="mobile-settings-tab" type="button" data-mobile-action="settings" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm8 4 2-1-2-4-2 .5a8 8 0 0 0-2-1.2L15.5 4h-7L8 6.3a8 8 0 0 0-2 1.2L4 7l-2 4 2 1a8 8 0 0 0 0 2l-2 1 2 4 2-.5a8 8 0 0 0 2 1.2l.5 2.3h7l.5-2.3a8 8 0 0 0 2-1.2l2 .5 2-4-2-1a8 8 0 0 0 0-2Z"/></svg>
+            <span>Ayarlar</span>
+        </button>
+    </nav>
 
     <dialog id="settings-dialog" class="settings-dialog">
         <form method="dialog" id="settings-form">

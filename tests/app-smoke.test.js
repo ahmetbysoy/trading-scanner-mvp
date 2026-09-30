@@ -18,6 +18,7 @@ function createElement(id = '') {
         className: '',
         style: {},
         dataset: {},
+        attributes: {},
         clientWidth: 900,
         clientHeight: 500,
         parentElement: null,
@@ -34,12 +35,18 @@ function createElement(id = '') {
             }
         },
         addEventListener(name, handler) { (listeners[name] ||= []).push(handler); },
+        setAttribute(name, value) { this.attributes[name] = String(value); },
+        getAttribute(name) { return this.attributes[name] ?? null; },
         appendChild() {},
         prepend() {},
         remove() {},
-        click() {},
+        click() { (listeners.click || []).forEach(handler => handler({ currentTarget: this, target: this })); },
         showModal() { this.open = true; },
-        close() { this.open = false; },
+        close() {
+            this.open = false;
+            (listeners.close || []).forEach(handler => handler({ currentTarget: this, target: this }));
+        },
+        scrollTo(options) { this.scrollTop = options?.top ?? 0; },
         getContext() {
             return {
                 clearRect() {}, setTransform() {}, fillRect() {}, fillText() {},
@@ -62,6 +69,14 @@ function createBrowserContext() {
     const documentElement = createElement('html');
     documentElement.dataset.theme = 'dark';
     const body = createElement('body');
+    const mobileTabs = ['home', 'market', 'signals', 'learning'].map(view => {
+        const tab = createElement(`mobile-tab-${view}`);
+        tab.dataset.mobileView = view;
+        return tab;
+    });
+    const settingsTab = elements.get('mobile-settings-tab');
+    settingsTab.dataset.mobileAction = 'settings';
+    const appShell = createElement('app-shell');
     const document = {
         documentElement,
         body,
@@ -69,7 +84,15 @@ function createBrowserContext() {
             if (!elements.has(id)) elements.set(id, createElement(id));
             return elements.get(id);
         },
-        querySelectorAll() { return []; },
+        querySelector(selector) {
+            if (selector === '.app-shell') return appShell;
+            return null;
+        },
+        querySelectorAll(selector) {
+            if (selector === '#mobile-tabbar [data-mobile-view]') return mobileTabs;
+            if (selector === '#mobile-tabbar .mobile-tab') return [...mobileTabs, settingsTab];
+            return [];
+        },
         createElement: id => createElement(id)
     };
 
@@ -92,6 +115,8 @@ function createBrowserContext() {
     const context = {
         console,
         document,
+        navigator: {},
+        isSecureContext: false,
         localStorage: {
             getItem: key => storage.has(key) ? storage.get(key) : null,
             setItem: (key, value) => storage.set(key, String(value)),
@@ -129,6 +154,8 @@ function createBrowserContext() {
     context.globalThis = context;
     context.windowListeners = windowListeners;
     context.elements = elements;
+    context.mobileTabs = mobileTabs;
+    context.appShell = appShell;
     return vm.createContext(context);
 }
 
@@ -166,4 +193,55 @@ test('uygulama null ticker verisiyle hatasız açılır ve adaptif paneli oluşt
     context.app.openSignalDetail('sig-detail');
     assert.match(context.elements.get('signal-contributors-body').innerHTML, /Hacimli kırılım/);
     assert.equal(context.elements.get('signal-detail-dialog').open, true);
+});
+
+test('mobil alt menü ekran değiştirir, görünümü saklar ve ayar sayfasını açar', async () => {
+    const context = createBrowserContext();
+    runScript(context, 'src/adaptive-learning.js');
+    runScript(context, 'src/confluence-engine.js');
+    runScript(context, 'src/app.js');
+
+    for (const handler of context.windowListeners.DOMContentLoaded || []) handler();
+    await Promise.resolve();
+
+    assert.equal(context.document.body.dataset.mobileView, 'home');
+    assert.equal(context.elements.get('mobile-page-title').textContent, 'Ana Sayfa');
+
+    const marketTab = context.mobileTabs.find(tab => tab.dataset.mobileView === 'market');
+    marketTab.click();
+    assert.equal(context.document.body.dataset.mobileView, 'market');
+    assert.equal(context.elements.get('mobile-page-title').textContent, 'Piyasa');
+    assert.equal(marketTab.classList.contains('active'), true);
+    assert.equal(marketTab.getAttribute('aria-selected'), 'true');
+    assert.equal(JSON.parse(context.localStorage.getItem('utc_mobile_view')), 'market');
+
+    const settingsTab = context.elements.get('mobile-settings-tab');
+    settingsTab.click();
+    assert.equal(context.elements.get('settings-dialog').open, true);
+    assert.equal(settingsTab.classList.contains('active'), true);
+    context.elements.get('settings-dialog').close();
+    assert.equal(settingsTab.classList.contains('active'), false);
+    assert.equal(marketTab.classList.contains('active'), true);
+
+    context.app.signals = [{
+        id: 'active', status: 'active', timestamp: Date.now(), direction: 'buy',
+        price: 100, score: 6, confirmations: 2, reason: 'test'
+    }];
+    context.app.renderSignals();
+    assert.equal(context.elements.get('mobile-signal-badge').hidden, false);
+    assert.equal(context.elements.get('mobile-signal-badge').textContent, '1');
+});
+
+test('mobil uygulama kabuğu güvenli alan ve erişilebilir navigasyon içerir', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.webmanifest'), 'utf8'));
+
+    assert.match(html, /viewport-fit=cover/);
+    assert.match(html, /<nav[^>]+mobile-tabbar[^>]+aria-label=/);
+    assert.equal((html.match(/class="mobile-tab/g) || []).length >= 5, true);
+    assert.match(css, /env\(safe-area-inset-bottom\)/);
+    assert.match(css, /min-height:\s*54px/);
+    assert.equal(manifest.display, 'standalone');
+    assert.equal(manifest.lang, 'tr');
 });
