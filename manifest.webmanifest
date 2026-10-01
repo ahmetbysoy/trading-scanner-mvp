@@ -1,0 +1,22 @@
+{
+  "name": "Ultimate Trading Komuta Merkezi",
+  "short_name": "UTC Scanner",
+  "description": "Çoklu strateji teyitli canlı kripto vadeli işlem tarayıcısı.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070a0f",
+  "theme_color": "#070a0f",
+  "lang": "tr",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

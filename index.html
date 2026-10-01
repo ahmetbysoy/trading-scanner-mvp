@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Çoklu strateji teyitli, ters sinyal korumalı canlı kripto vadeli işlem tarayıcısı.">
+    <meta name="theme-color" content="#070a0f">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="UTC Scanner">
+    <title>Ultimate Trading Komuta Merkezi</title>
+    <link rel="manifest" href="./manifest.webmanifest?v=1">
+    <link rel="icon" href="./icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./styles.css?v=12">
+    <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+    <script defer src="./src/adaptive-learning.js?v=12"></script>
+    <script defer src="./src/market-quality.js?v=12"></script>
+    <script defer src="./src/confluence-engine.js?v=12"></script>
+    <script defer src="./src/app.js?v=12"></script>
+</head>
+<body data-mobile-view="home">
+    <noscript>Bu uygulamayı kullanmak için JavaScript etkin olmalıdır.</noscript>
+
+    <header class="topbar">
+        <div class="brand-block">
+            <div class="brand-mark" aria-hidden="true">UTC</div>
+            <div class="desktop-brand-copy">
+                <div class="eyebrow">CANLI PİYASA TARAYICI</div>
+                <h1>Komuta Merkezi</h1>
+            </div>
+            <span id="mobile-page-title" class="mobile-page-title">Ana Sayfa</span>
+        </div>
+        <div class="ticker" aria-live="polite">
+            <span id="ticker-symbol">BTC/USDT</span>
+            <strong id="ticker-price">—</strong>
+            <span id="ticker-change" class="neutral">—</span>
+        </div>
+        <div class="top-actions">
+            <button id="theme-btn" class="icon-btn" type="button" title="Temayı değiştir" aria-label="Temayı değiştir">◐</button>
+            <button id="settings-btn" class="btn btn-ghost" type="button">Ayarlar</button>
+        </div>
+    </header>
+
+    <main class="app-shell">
+        <section class="control-panel panel mobile-page-home" aria-labelledby="controls-title">
+            <div class="panel-heading control-heading">
+                <div>
+                    <span class="eyebrow">SİSTEM</span>
+                    <h2 id="controls-title">Tarama Kontrolleri</h2>
+                </div>
+                <div id="connection-badge" class="connection-badge offline">
+                    <span class="status-dot"></span>
+                    <span id="connection-text">BAĞLANTI YOK</span>
+                </div>
+            </div>
+
+            <div class="control-grid">
+                <label class="field">
+                    <span>Parite</span>
+                    <div class="symbol-field">
+                        <input id="symbol-input" type="text" value="BTC" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Parite">
+                        <b>/USDT</b>
+                    </div>
+                </label>
+                <label class="field">
+                    <span>Zaman Dilimi</span>
+                    <select id="timeframe-select" aria-label="Zaman dilimi">
+                        <option value="1m">1 dakika</option>
+                        <option value="5m">5 dakika</option>
+                        <option value="15m" selected>15 dakika</option>
+                        <option value="1h">1 saat</option>
+                        <option value="4h">4 saat</option>
+                    </select>
+                </label>
+                <div class="system-actions">
+                    <button id="start-btn" class="btn btn-primary" type="button">Sistemi Başlat</button>
+                    <button id="stop-btn" class="btn btn-danger" type="button" disabled>Durdur</button>
+                </div>
+            </div>
+
+            <div class="metrics-grid">
+                <article class="metric">
+                    <span>Fiyat</span>
+                    <strong id="current-price">—</strong>
+                </article>
+                <article class="metric">
+                    <span>24s Değişim</span>
+                    <strong id="change-24h">—</strong>
+                </article>
+                <article class="metric">
+                    <span>24s Hacim</span>
+                    <strong id="volume-24h">—</strong>
+                </article>
+                <article class="metric">
+                    <span>ATR</span>
+                    <strong id="atr-value">—</strong>
+                </article>
+            </div>
+
+            <section class="command-stream" aria-labelledby="command-stream-title">
+                <div class="command-stream-heading">
+                    <div>
+                        <span class="eyebrow">OLAY OMURGASI</span>
+                        <strong id="command-stream-title">Canlı Komuta Akışı</strong>
+                    </div>
+                    <span id="command-health" class="stream-health waiting" role="status" aria-live="polite">BEKLEMEDE</span>
+                </div>
+                <div class="command-stream-grid">
+                    <article>
+                        <span>Trade akışı</span>
+                        <strong id="command-trade-rate">0.0/sn</strong>
+                        <small id="command-trade-age">Veri yok</small>
+                    </article>
+                    <article>
+                        <span>Mum / Derinlik</span>
+                        <strong id="command-market-sync">0 / 0</strong>
+                        <small id="command-market-age">Bekleniyor</small>
+                    </article>
+                    <article>
+                        <span>Piyasa kalitesi</span>
+                        <strong id="command-market-quality" class="quality-state stopped">DURDURULDU</strong>
+                        <small id="command-market-quality-detail">Veri bekleniyor</small>
+                    </article>
+                    <article>
+                        <span>Strateji motoru</span>
+                        <strong id="command-strategy-state">0 / 0</strong>
+                        <small id="command-proposal-count">0 teklif</small>
+                    </article>
+                    <article>
+                        <span>Son karar</span>
+                        <strong id="command-decision">BEKLEMEDE</strong>
+                        <small id="command-event-sequence">Olay #0</small>
+                    </article>
+                </div>
+            </section>
+        </section>
+
+        <section class="workspace">
+            <section class="market-panel panel mobile-page-market">
+                <div class="panel-heading market-heading">
+                    <div>
+                        <span class="eyebrow">PİYASA GÖRÜNÜMÜ</span>
+                        <h2 id="market-title">BTC/USDT · 15m</h2>
+                    </div>
+                    <div class="segmented" role="group" aria-label="Piyasa görünümü">
+                        <button id="chart-view-btn" class="active" type="button">Grafik</button>
+                        <button id="heatmap-view-btn" type="button">Isı Haritası</button>
+                    </div>
+                </div>
+
+                <div id="chart-view" class="visual-view active">
+                    <div id="live-chart" aria-label="Canlı mum grafiği"></div>
+                    <div class="chart-tools">
+                        <button id="zoom-in-btn" type="button" title="Yakınlaştır">+</button>
+                        <button id="zoom-out-btn" type="button" title="Uzaklaştır">−</button>
+                        <button id="zoom-reset-btn" type="button">Sıfırla</button>
+                    </div>
+                    <div id="chart-empty" class="empty-state">
+                        <strong>Canlı veri bekleniyor</strong>
+                        <span>Grafiği yüklemek için sistemi başlat.</span>
+                    </div>
+                </div>
+
+                <div id="heatmap-view" class="visual-view" hidden>
+                    <canvas id="orderbook-heatmap" aria-label="Emir defteri ısı haritası"></canvas>
+                    <div id="heatmap-empty" class="empty-state">
+                        <strong>Emir defteri bekleniyor</strong>
+                        <span>Canlı bağlantı kurulduğunda ısı haritası oluşur.</span>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="signals-panel panel mobile-page-signals" aria-labelledby="signals-title">
+                <div class="panel-heading">
+                    <div>
+                        <span class="eyebrow">SİNYAL MOTORU</span>
+                        <h2 id="signals-title">Sinyaller</h2>
+                    </div>
+                    <button id="clear-signals-btn" class="btn btn-small btn-ghost" type="button">Temizle</button>
+                </div>
+
+                <div id="active-signal-card" class="active-signal-card empty">
+                    <span class="active-label">AKTİF POZİSYON KİLİDİ</span>
+                    <strong id="active-signal-title">Aktif sinyal yok</strong>
+                    <span id="active-signal-detail">Yeni sinyal için en az iki bağımsız teyit bekleniyor.</span>
+                    <button id="active-contributors-btn" class="btn btn-small btn-ghost" type="button" hidden>Katkıları canlı gör</button>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zaman</th>
+                                <th>Yön</th>
+                                <th>Fiyat</th>
+                                <th>Skor</th>
+                                <th>Teyit</th>
+                                <th>Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody id="signals-body">
+                            <tr><td colspan="6" class="table-empty">Henüz sinyal yok.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="stats-grid">
+                    <article><span>Sonuçlanan</span><strong id="stat-total">0</strong></article>
+                    <article><span>TP</span><strong id="stat-tp" class="positive">0</strong></article>
+                    <article><span>SL</span><strong id="stat-sl" class="negative">0</strong></article>
+                    <article><span>Başarı</span><strong id="stat-winrate">—</strong></article>
+                </div>
+            </aside>
+        </section>
+
+        <section class="safety-panel panel mobile-page-home">
+            <div class="safety-icon" aria-hidden="true">✓</div>
+            <div>
+                <span class="eyebrow">TERS SİNYAL KORUMASI AKTİF</span>
+                <p>Tek stratejinin skoru yeterli değildir. Aktif sinyal kapanmadan ters yön üretilmez; kapanış sonrasında zaman, skor ve bağımsız teyit kuralları uygulanır.</p>
+            </div>
+            <div class="safety-chips" id="safety-chips"></div>
+        </section>
+
+        <section class="learning-panel panel mobile-page-learning" aria-labelledby="learning-title">
+            <div class="panel-heading learning-heading">
+                <div>
+                    <span class="eyebrow">ADAPTİF HİBRİT MOTOR</span>
+                    <h2 id="learning-title">Strateji Öğrenme Merkezi</h2>
+                </div>
+                <div class="learning-actions">
+                    <label class="compact-select">
+                        <span>Mod</span>
+                        <select id="learning-mode" aria-label="Öğrenme modu">
+                            <option value="auto">Otomatik</option>
+                            <option value="shadow">Sadece Shadow</option>
+                            <option value="paused">Durduruldu</option>
+                        </select>
+                    </label>
+                    <button id="export-learning-btn" class="btn btn-small btn-ghost" type="button">JSON Aktar</button>
+                    <button id="reset-learning-btn" class="btn btn-small btn-danger" type="button">Öğrenmeyi Sıfırla</button>
+                </div>
+            </div>
+
+            <div class="learning-summary">
+                <article><span>Piyasa Rejimi</span><strong id="learning-regime">Hazırlanıyor</strong></article>
+                <article><span>Live Sonuç</span><strong id="learning-live-count">0</strong></article>
+                <article><span>Shadow Sonuç</span><strong id="learning-shadow-count">0</strong></article>
+                <article><span>Aktif Shadow</span><strong id="learning-active-shadow">0</strong></article>
+                <article><span>Optimizasyon</span><strong id="learning-optimization-count">0</strong></article>
+                <article><span>Global Cooldown</span><strong id="learning-global-cooldown">×1.00</strong></article>
+            </div>
+
+            <div class="learning-status" id="learning-status">
+                İstatistikler yükleniyor. Ağırlıklar yeterli örnek oluşana kadar nötr kalır.
+            </div>
+
+            <div class="learning-table-wrap">
+                <table class="learning-table">
+                    <thead>
+                        <tr>
+                            <th>Strateji</th>
+                            <th>Rol</th>
+                            <th>Live</th>
+                            <th>Shadow</th>
+                            <th>Bayes Win%</th>
+                            <th>Ort. R</th>
+                            <th>EWMA R</th>
+                            <th>Ağırlık</th>
+                            <th>Cooldown</th>
+                        </tr>
+                    </thead>
+                    <tbody id="learning-body">
+                        <tr><td colspan="9" class="table-empty">Öğrenme verisi bekleniyor.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <nav id="mobile-tabbar" class="mobile-tabbar" aria-label="Mobil ana menü">
+        <button class="mobile-tab active" type="button" data-mobile-view="home" aria-selected="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+            <span>Ana Sayfa</span>
+        </button>
+        <button class="mobile-tab" type="button" data-mobile-view="market" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m6 13v-7m5 7V3M2 20h20"/></svg>
+            <span>Piyasa</span>
+        </button>
+        <button class="mobile-tab" type="button" data-mobile-view="signals" aria-selected="false">
+            <span id="mobile-signal-badge" class="mobile-tab-badge" hidden>0</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7m0 0 3 3m-3-3-3 3M19 4v7m0 0 3-3m-3 3-3-3M10 7h4m-4 10h4"/></svg>
+            <span>Sinyaller</span>
+        </button>
+        <button class="mobile-tab" type="button" data-mobile-view="learning" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 5.2A4 4 0 0 0 9 20h1v-6H8m4-11a4 4 0 0 1 4 4v1a3 3 0 0 1 2 5.2A4 4 0 0 1 15 20h-1v-6h2M10 8h4m-4 3h4"/></svg>
+            <span>Öğrenme</span>
+        </button>
+        <button class="mobile-tab" id="mobile-settings-tab" type="button" data-mobile-action="settings" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm8 4 2-1-2-4-2 .5a8 8 0 0 0-2-1.2L15.5 4h-7L8 6.3a8 8 0 0 0-2 1.2L4 7l-2 4 2 1a8 8 0 0 0 0 2l-2 1 2 4 2-.5a8 8 0 0 0 2 1.2l.5 2.3h7l.5-2.3a8 8 0 0 0 2-1.2l2 .5 2-4-2-1a8 8 0 0 0 0-2Z"/></svg>
+            <span>Ayarlar</span>
+        </button>
+    </nav>
+
+    <dialog id="settings-dialog" class="settings-dialog">
+        <form method="dialog" id="settings-form">
+            <div class="dialog-heading">
+                <div>
+                    <span class="eyebrow">YAPILANDIRMA</span>
+                    <h2>Ayarlar ve Stratejiler</h2>
+                </div>
+                <button id="close-settings-btn" class="icon-btn" value="cancel" type="submit" formnovalidate aria-label="Ayarları kapat">×</button>
+            </div>
+
+            <nav class="settings-section-nav" aria-label="Ayar bölümleri">
+                <button type="button" data-settings-target="settings-basic">Temel</button>
+                <button type="button" data-settings-target="settings-safety">Güvenlik</button>
+                <button type="button" data-settings-target="settings-quality">Piyasa</button>
+                <button type="button" data-settings-target="settings-learning">Öğrenme</button>
+                <button type="button" data-settings-target="settings-cooldowns">Cooldown</button>
+                <button type="button" data-settings-target="settings-strategies">Stratejiler</button>
+            </nav>
+
+            <div class="dialog-body">
+                <fieldset id="settings-basic">
+                    <legend>Temel Parametreler</legend>
+                    <div class="settings-grid">
+                        <label class="field"><span>Minimum Uyum Skoru</span><input id="setting-threshold" type="number" min="1" max="50" step="1"></label>
+                        <label class="field"><span>RSI Periyodu</span><input id="setting-rsi" type="number" min="2" max="100" step="1"></label>
+                        <label class="field"><span>ATR Periyodu</span><input id="setting-atr" type="number" min="2" max="100" step="1"></label>
+                        <label class="field"><span>Duvar Tespiti (BTC)</span><input id="setting-wall" type="number" min="0.1" max="10000" step="0.1"></label>
+                        <label class="field"><span>Risk / Ödül</span><input id="setting-rr" type="number" min="0.1" max="20" step="0.1"></label>
+                        <label class="field"><span>Teklif Geçerliliği (ms)</span><input id="setting-proposal-timeout" type="number" min="500" max="30000" step="100"></label>
+                    </div>
+                </fieldset>
+
+                <fieldset id="settings-safety" class="safety-fieldset">
+                    <legend>Sinyal Güvenliği</legend>
+                    <div class="settings-grid">
+                        <label class="field"><span>Değerlendirme Penceresi (ms)</span><input id="setting-evaluation-delay" type="number" min="100" max="10000" step="100"></label>
+                        <label class="field"><span>Minimum Skor Farkı</span><input id="setting-score-lead" type="number" min="0" max="20" step="1"></label>
+                        <label class="field"><span>Minimum Bağımsız Teyit</span><input id="setting-confirmations" type="number" min="1" max="10" step="1"></label>
+                        <label class="field"><span>Minimum Strateji Ailesi</span><input id="setting-independent-families" type="number" min="1" max="4" step="1"></label>
+                        <label class="field"><span>Aile Katkı Limiti</span><input id="setting-family-cap" type="number" min="0.25" max="1" step="0.05"></label>
+                        <label class="field"><span>Kararlılık Penceresi</span><input id="setting-conviction-windows" type="number" min="1" max="10" step="1"></label>
+                        <label class="field"><span>Ters Kararlılık Penceresi</span><input id="setting-reversal-windows" type="number" min="1" max="10" step="1"></label>
+                        <label class="field"><span>Ters Ek Histerezis Puanı</span><input id="setting-reverse-hysteresis" type="number" min="0" max="20" step="0.5"></label>
+                        <label class="field"><span>Ters ATR Geçersizliği</span><input id="setting-reversal-atr" type="number" min="0" max="5" step="0.1"></label>
+                        <label class="field"><span>Ters Yön Kilidi (ms)</span><input id="setting-opposite-lock" type="number" min="0" max="3600000" step="1000"></label>
+                        <label class="field"><span>Ters Sinyal Teyidi</span><input id="setting-reversal-confirmations" type="number" min="1" max="10" step="1"></label>
+                        <label class="field"><span>Ters Skor Katsayısı</span><input id="setting-reversal-multiplier" type="number" min="1" max="5" step="0.05"></label>
+                    </div>
+                    <label class="toggle-row">
+                        <span><b>Aktif sinyal kilidi</b><small>Aktif işlem kapanmadan yeni veya ters sinyal üretme.</small></span>
+                        <input id="setting-active-lock" type="checkbox">
+                    </label>
+                    <label class="toggle-row">
+                        <span><b>Ters sinyalde mum kapanışı</b><small>ATR geçersizliğini anlık fiyat yerine son kapanmış mumla doğrula.</small></span>
+                        <input id="setting-reversal-close" type="checkbox">
+                    </label>
+                </fieldset>
+
+                <fieldset id="settings-quality" class="quality-fieldset">
+                    <legend>Piyasa Kalite Geçidi</legend>
+                    <div class="settings-grid">
+                        <label class="field"><span>Maksimum Trade Yaşı (ms)</span><input id="setting-quality-trade-age" type="number" min="500" max="60000" step="100"></label>
+                        <label class="field"><span>Maksimum Depth Yaşı (ms)</span><input id="setting-quality-depth-age" type="number" min="500" max="60000" step="100"></label>
+                        <label class="field"><span>Maksimum Transport Gecikmesi (ms)</span><input id="setting-quality-transport-lag" type="number" min="250" max="30000" step="250"></label>
+                        <label class="field"><span>Maksimum Spread (bp)</span><input id="setting-quality-spread" type="number" min="0.1" max="1000" step="0.1"></label>
+                        <label class="field"><span>Minimum Taraf Derinliği (USD)</span><input id="setting-quality-depth-usd" type="number" min="0" max="1000000000000" step="1000"></label>
+                        <label class="field"><span>Şok Hareketi (bp)</span><input id="setting-quality-shock-bps" type="number" min="1" max="10000" step="1"></label>
+                        <label class="field"><span>Şok Penceresi (ms)</span><input id="setting-quality-shock-window" type="number" min="250" max="60000" step="250"></label>
+                        <label class="field"><span>Şok Kilidi (ms)</span><input id="setting-quality-shock-pause" type="number" min="1000" max="900000" step="1000"></label>
+                    </div>
+                    <label class="toggle-row">
+                        <span><b>Piyasa kalite kilidi</b><small>Bayat/geçersiz veride veya fiyat şokunda yeni sinyal üretimini durdur.</small></span>
+                        <input id="setting-quality-enabled" type="checkbox">
+                    </label>
+                    <label class="toggle-row">
+                        <span><b>Depth zorunluluğu</b><small>Taze ve geçerli Futures depth verisi olmadan yeni sinyal üretme.</small></span>
+                        <input id="setting-quality-require-depth" type="checkbox">
+                    </label>
+                </fieldset>
+
+                <fieldset id="settings-learning" class="learning-fieldset">
+                    <legend>Adaptif Öğrenme</legend>
+                    <div class="settings-grid">
+                        <label class="field"><span>Minimum Örnek</span><input id="setting-learning-min-samples" type="number" min="5" max="500" step="1"></label>
+                        <label class="field"><span>Optimizasyon Aralığı (sonuç)</span><input id="setting-learning-every" type="number" min="1" max="100" step="1"></label>
+                        <label class="field"><span>Shadow Etkisi</span><input id="setting-shadow-influence" type="number" min="0" max="1" step="0.05"></label>
+                        <label class="field"><span>Minimum Ağırlık</span><input id="setting-min-weight" type="number" min="0.2" max="1" step="0.05"></label>
+                        <label class="field"><span>Maksimum Ağırlık</span><input id="setting-max-weight" type="number" min="1" max="3" step="0.05"></label>
+                    </div>
+                    <label class="toggle-row">
+                        <span><b>Shadow değerlendirme</b><small>Nihai sinyale katılmayan stratejileri hayali TP/SL ile ölç.</small></span>
+                        <input id="setting-shadow-enabled" type="checkbox">
+                    </label>
+                </fieldset>
+
+                <fieldset id="settings-cooldowns">
+                    <legend>Cooldown</legend>
+                    <div class="settings-grid">
+                        <label class="field"><span>Genel Sinyal (ms)</span><input id="setting-signal-cooldown" type="number" min="0" max="3600000" step="1000"></label>
+                        <label class="field"><span>Aynı Yön (ms)</span><input id="setting-same-cooldown" type="number" min="0" max="3600000" step="1000"></label>
+                        <label class="field"><span>Strateji Teklifi (ms)</span><input id="setting-strategy-cooldown" type="number" min="0" max="3600000" step="1000"></label>
+                    </div>
+                </fieldset>
+
+                <fieldset id="settings-strategies">
+                    <legend>Aktif Stratejiler</legend>
+                    <div id="strategy-toggles" class="strategy-grid"></div>
+                </fieldset>
+            </div>
+
+            <div class="dialog-footer">
+                <button id="reset-settings-btn" class="btn btn-danger" type="button"><span class="desktop-reset-label">Varsayılana Dön</span><span class="mobile-reset-label">Sıfırla</span></button>
+                <div class="dialog-footer-right">
+                    <button class="btn btn-ghost" value="cancel" type="submit" formnovalidate>Vazgeç</button>
+                    <button id="save-settings-btn" class="btn btn-primary" value="default" type="submit">Kaydet</button>
+                </div>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="signal-detail-dialog" class="settings-dialog signal-detail-dialog">
+        <div class="dialog-heading">
+            <div>
+                <span class="eyebrow">SİNYAL KARAR İZİ</span>
+                <h2 id="signal-detail-title">Sinyal Detayı</h2>
+            </div>
+            <button id="close-signal-detail-btn" class="icon-btn" type="button" aria-label="Sinyal detayını kapat">×</button>
+        </div>
+        <div class="dialog-body">
+            <div id="signal-detail-summary" class="signal-detail-summary"></div>
+            <h3 class="detail-section-title">Katkıda Bulunan Stratejiler</h3>
+            <div class="learning-table-wrap detail-table-wrap">
+                <table class="learning-table">
+                    <thead><tr><th>Strateji</th><th>Aile</th><th>Sebep</th><th>Temel</th><th>Öğrenme</th><th>Rejim</th><th>Etkin</th><th>Net Katkı</th></tr></thead>
+                    <tbody id="signal-contributors-body"></tbody>
+                </table>
+            </div>
+            <h3 class="detail-section-title">Karşıt Oylar</h3>
+            <div class="learning-table-wrap detail-table-wrap">
+                <table class="learning-table">
+                    <thead><tr><th>Strateji</th><th>Yön</th><th>Aile</th><th>Sebep</th><th>Etkin Skor</th></tr></thead>
+                    <tbody id="signal-opponents-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </dialog>
+
+    <div id="notifications" class="notifications" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>
