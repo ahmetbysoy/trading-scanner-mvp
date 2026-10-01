@@ -77,6 +77,8 @@
             this.volume = null;
             this.signalMarkers = [];
             this.resizeObserver = null;
+            this.pricePrecision = 2;
+            this.dataLength = 0;
             this.init();
         }
 
@@ -106,6 +108,10 @@
 
         chartOptions() {
             const styles = getComputedStyle(document.documentElement);
+            const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 720px)').matches;
+            const gridColor = document.documentElement.dataset.theme === 'light'
+                ? 'rgba(102, 117, 138, 0.18)'
+                : styles.getPropertyValue('--border').trim();
             return {
                 width: Math.max(1, this.container.clientWidth),
                 height: Math.max(1, this.container.clientHeight),
@@ -113,11 +119,11 @@
                     backgroundColor: 'transparent',
                     textColor: styles.getPropertyValue('--muted').trim(),
                     fontFamily: '"Roboto Mono", monospace',
-                    fontSize: 10
+                    fontSize: isMobile ? 11 : 10
                 },
                 grid: {
-                    vertLines: { color: styles.getPropertyValue('--border').trim() },
-                    horzLines: { color: styles.getPropertyValue('--border').trim() }
+                    vertLines: { color: gridColor },
+                    horzLines: { color: gridColor }
                 },
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
                 rightPriceScale: { borderColor: styles.getPropertyValue('--border').trim() },
@@ -142,8 +148,35 @@
                 borderVisible: false,
                 wickUpColor: positive,
                 wickDownColor: negative,
-                priceFormat: { type: 'price', precision: 6, minMove: 0.000001 }
+                priceFormat: {
+                    type: 'price',
+                    precision: this.pricePrecision,
+                    minMove: 10 ** -this.pricePrecision
+                }
             };
+        }
+
+        updatePriceFormat(price) {
+            if (!finite(price)) return;
+            const numeric = Math.abs(Number(price));
+            const precision = numeric >= 100 ? 2 : numeric >= 1 ? 3 : numeric >= 0.01 ? 4 : 6;
+            if (precision === this.pricePrecision) return;
+            this.pricePrecision = precision;
+            if (this.candles) this.candles.applyOptions(this.candleOptions());
+        }
+
+        focusLatest() {
+            if (!this.dataLength) return;
+            const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 720px)').matches;
+            if (!isMobile) {
+                this.chart.timeScale().fitContent();
+                return;
+            }
+            const visibleBars = Math.min(120, this.dataLength);
+            this.chart.timeScale().setVisibleLogicalRange({
+                from: Math.max(0, this.dataLength - visibleBars),
+                to: this.dataLength + 6
+            });
         }
 
         updateTheme() {
@@ -152,6 +185,8 @@
         }
 
         setData(candles) {
+            this.dataLength = candles.length;
+            if (candles.length) this.updatePriceFormat(candles.at(-1).close);
             const candleData = candles.map(candle => ({
                 time: candle.time / 1000,
                 open: candle.open,
@@ -166,10 +201,11 @@
             }));
             this.candles.setData(candleData);
             this.volume.setData(volumeData);
-            if (candles.length) this.chart.timeScale().fitContent();
+            if (candles.length) this.focusLatest();
         }
 
         updateRealtime(candle) {
+            this.updatePriceFormat(candle.close);
             const data = {
                 time: candle.time / 1000,
                 open: candle.open,
@@ -211,7 +247,7 @@
         }
 
         resetZoom() {
-            this.chart.timeScale().fitContent();
+            this.focusLatest();
         }
     }
 
@@ -263,11 +299,24 @@
             this.drawLevels(bids, 'bid', maxQuantity, half, half, price);
 
             const styles = getComputedStyle(document.documentElement);
-            this.ctx.strokeStyle = styles.getPropertyValue('--border-strong').trim();
+            this.ctx.strokeStyle = styles.getPropertyValue('--primary').trim();
+            this.ctx.lineWidth = 2;
             this.ctx.beginPath();
             this.ctx.moveTo(0, half);
             this.ctx.lineTo(this.width, half);
             this.ctx.stroke();
+            this.ctx.lineWidth = 1;
+
+            const labelLeft = Math.max(0, this.width - 58);
+            this.ctx.fillStyle = styles.getPropertyValue('--panel').trim();
+            this.ctx.fillRect(labelLeft, half - 18, 54, 15);
+            this.ctx.fillRect(labelLeft, half + 3, 54, 15);
+            this.ctx.font = '600 10px "Roboto Mono"';
+            this.ctx.textAlign = 'right';
+            this.ctx.fillStyle = styles.getPropertyValue('--negative').trim();
+            this.ctx.fillText('SATIŞ', this.width - 9, half - 7);
+            this.ctx.fillStyle = styles.getPropertyValue('--positive').trim();
+            this.ctx.fillText('ALIŞ', this.width - 9, half + 14);
         }
 
         drawLevels(levels, type, maxQuantity, offsetY, availableHeight, referencePrice) {
@@ -282,14 +331,21 @@
                 const intensity = clamp(Math.sqrt(quantity / maxQuantity), 0, 1);
                 const y = offsetY + index * height;
                 const red = type === 'ask' ? '255, 95, 109' : '43, 217, 159';
+                const barWidth = this.width * intensity;
+                const barX = type === 'ask' ? this.width - barWidth : 0;
                 this.ctx.fillStyle = `rgba(${red}, ${0.08 + intensity * 0.5})`;
-                this.ctx.fillRect(0, y, this.width * intensity, Math.max(height, 1));
+                this.ctx.fillRect(barX, y, barWidth, Math.max(height, 1));
 
                 if (index % skip === 0) {
                     this.ctx.fillStyle = textColor;
-                    this.ctx.font = '9px "Roboto Mono"';
+                    this.ctx.font = `${this.width <= 720 ? 10 : 9}px "Roboto Mono"`;
                     this.ctx.textAlign = 'left';
-                    this.ctx.fillText(`${quantity.toFixed(3)} @ ${price.toFixed(decimals)}`, 9, y + Math.min(12, height - 2));
+                    const labelHeight = height * skip;
+                    this.ctx.fillText(
+                        `${quantity.toFixed(3)} @ ${price.toFixed(decimals)}`,
+                        9,
+                        y + Math.max(9, Math.min(12, labelHeight - 2))
+                    );
                 }
             });
         }
@@ -1468,6 +1524,7 @@
                 this.heatmapManager.draw(this.orderBook, this.marketData.price);
             } else {
                 this.chartManager.resize();
+                this.chartManager.focusLatest();
             }
         }
 
@@ -1803,7 +1860,7 @@
         try {
             window.app = new TradingScannerApp();
             if ('serviceWorker' in navigator && window.isSecureContext) {
-                navigator.serviceWorker.register('./sw.js?v=4').catch(error => {
+                navigator.serviceWorker.register('./sw.js?v=5').catch(error => {
                     console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
                 });
             }

@@ -19,6 +19,8 @@ Bu repo, paylaşılan tarayıcı tabanlı scanner'daki **birkaç saniye içinde 
 
 Üst canlı ticker ve alt navigasyon sabittir; iOS/Android güvenli alanları hesaba katılır. Son mobil ekran ile grafik/heatmap seçimi cihazda saklanır. `manifest.webmanifest` ve `sw.js` sayesinde desteklenen tarayıcılarda ana ekrana bağımsız uygulama olarak kurulabilir. Masaüstü düzeni 720px üstünde korunur.
 
+Mobil Piyasa görünümü enstrüman fiyatına göre eksen hassasiyetini otomatik seçer, son 120 mumu odaklar ve zoom araçlarını sağ fiyat ekseninden uzak tutar. Isı haritasında satış derinliği sağdan, alış derinliği soldan büyür; renkli ayraç ve `SATIŞ` / `ALIŞ` etiketleri makası belirginleştirir.
+
 Kono kaynak incelemesindeki “kullan / uyarla / reddet” kararları için [`docs/kono-mobile-analysis.md`](docs/kono-mobile-analysis.md) belgesine bakın.
 
 ## Adaptif hibrit öğrenme
@@ -186,3 +188,4 @@ Testler şu senaryoları kapsar:
 - Contributor net katkısı ve yüzdesi aile tavanı sonrasında doğru dağıtılır.
 - Masaüstü dashboard, ayarlar, tema, chart/heatmap, start/stop ve öğrenme dışa aktarımı gerçek Chromium'da çalışır.
 - Mobil alt navigasyon, görünüm kalıcılığı, tam ekran dialoglar, sinyal rozeti ve dokunma hedefleri gerçek mobil viewport'ta çalışır.
+- Gerçek Lightweight Charts paketiyle BTC ekseninin iki ondalık basamak kullandığı, son mum aralığının odaklandığı ve mobil araçların fiyat ekseniyle çakışmadığı doğrulanır.

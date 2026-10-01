@@ -1,24 +1,11 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 
-const chartLibraryMock = `
-window.LightweightCharts = {
-  CrosshairMode: { Normal: 0 },
-  createChart() {
-    const series = { setData(){}, update(){}, applyOptions(){}, setMarkers(){} };
-    return {
-      addCandlestickSeries(){ return { ...series }; },
-      addHistogramSeries(){ return { ...series }; },
-      resize(){}, applyOptions(){},
-      timeScale(){
-        return {
-          fitContent(){},
-          getVisibleLogicalRange(){ return { from: 0, to: 100 }; },
-          setVisibleLogicalRange(){}
-        };
-      }
-    };
-  }
-};`;
+const chartLibrary = fs.readFileSync(
+    path.join(__dirname, '..', 'node_modules', 'lightweight-charts', 'dist', 'lightweight-charts.standalone.production.js'),
+    'utf8'
+);
 
 function candleRows(count = 80) {
     const interval = 15 * 60 * 1000;
@@ -43,7 +30,7 @@ async function preparePage(page) {
     await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({
         status: 200,
         contentType: 'application/javascript',
-        body: chartLibraryMock
+        body: chartLibrary
     }));
     await page.route('https://fonts.googleapis.com/**', route => route.abort());
     await page.route('https://fonts.gstatic.com/**', route => route.abort());
@@ -283,11 +270,61 @@ test.describe('mobil uygulama akışı', () => {
         await page.locator('.app-shell').evaluate(node => { node.scrollTop = node.scrollHeight; });
         await page.screenshot({ path: 'test-results/audit-02-home-bottom.png' });
 
+        await page.evaluate(() => {
+            const now = Date.now();
+            const interval = 60_000;
+            window.app.candles = Array.from({ length: 180 }, (_, index) => {
+                const wave = Math.sin(index / 8) * 45;
+                const close = 83500 + index * 0.32 + wave;
+                const open = close - Math.cos(index / 5) * 18;
+                return {
+                    time: now - (180 - index) * interval,
+                    closeTime: now - (179 - index) * interval - 1,
+                    open,
+                    high: Math.max(open, close) + 16,
+                    low: Math.min(open, close) - 14,
+                    close,
+                    volume: 80 + (index % 24) * 5,
+                    closed: true
+                };
+            });
+            window.app.marketData.price = window.app.candles.at(-1).close;
+            window.app.marketData.change24h = 1.42;
+            window.app.marketData.volume24h = 245_000_000;
+            window.app.chartManager.setData(window.app.candles);
+            window.app.orderBook = {
+                asks: [['83560.20', '0.12'], ['83561.00', '2.39'], ['83562.10', '0.08'], ['83563.40', '1.35']].map(row => row.map(Number)),
+                bids: [['83559.80', '1.76'], ['83559.20', '0.31'], ['83558.60', '0.82'], ['83557.90', '1.18']].map(row => row.map(Number))
+            };
+            window.app.renderPrice();
+            document.getElementById('chart-empty').classList.add('hidden');
+            document.getElementById('heatmap-empty').classList.add('hidden');
+        });
+
         await page.locator('#mobile-tabbar [data-mobile-view="market"]').click();
         await expect(page.locator('.market-panel')).toBeVisible();
         await expect(page.locator('.control-panel')).toBeHidden();
         await expect(page.locator('#mobile-page-title')).toHaveText('Piyasa');
+        await expect.poll(() => page.evaluate(() => window.app.chartManager.pricePrecision)).toBe(2);
+        const chartLayout = await page.evaluate(() => {
+            const tools = document.querySelector('.chart-tools').getBoundingClientRect();
+            const chartElement = document.getElementById('live-chart').getBoundingClientRect();
+            const chart = window.app.chartManager.chart;
+            const range = chart.timeScale().getVisibleLogicalRange();
+            return {
+                controlsRight: tools.right,
+                chartRight: chartElement.right,
+                priceScaleWidth: chart.priceScale('right').width(),
+                seriesPrecision: window.app.chartManager.candles.options().priceFormat.precision,
+                visibleBars: range ? range.to - range.from : null
+            };
+        });
+        expect(chartLayout.seriesPrecision).toBe(2);
+        expect(chartLayout.controlsRight).toBeLessThan(chartLayout.chartRight - chartLayout.priceScaleWidth - 8);
+        expect(chartLayout.visibleBars).toBeLessThanOrEqual(130);
         await page.screenshot({ path: 'test-results/audit-03-market-chart.png' });
+        await page.evaluate(() => window.app.toggleTheme());
+        await page.screenshot({ path: 'test-results/audit-03b-market-chart-light.png' });
         await page.locator('#heatmap-view-btn').click();
         await page.screenshot({ path: 'test-results/audit-04-market-heatmap.png' });
 

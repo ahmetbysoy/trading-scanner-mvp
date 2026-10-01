@@ -540,7 +540,7 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .segmented button { min-height: 44px; padding: 8px 10px; border-radius: 9px; }
     .visual-view { height: calc(100% - 72px); min-height: 0; }
     #live-chart, #orderbook-heatmap { min-height: 0; }
-    .chart-tools { top: 9px; right: 9px; }
+    .chart-tools { top: 9px; right: auto; left: 9px; }
     .chart-tools button { min-width: 44px; min-height: 44px; }
     .visual-view:has(.empty-state:not(.hidden)) .chart-tools { display: none; }
     .empty-state { padding: 24px; }
