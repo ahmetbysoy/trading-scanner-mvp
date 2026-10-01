@@ -55,6 +55,8 @@ async function preparePage(page) {
                 this.url = url;
                 this.readyState = FakeWebSocket.CONNECTING;
                 this.listeners = new Map();
+                window.__fakeSockets = window.__fakeSockets || [];
+                window.__fakeSockets.push(this);
                 window.__lastFakeSocket = this;
                 setTimeout(() => {
                     if (this.readyState !== FakeWebSocket.CONNECTING) return;
@@ -190,24 +192,53 @@ test.describe('masaüstü uygulama akışı', () => {
 
     test('başlat/durdur, piyasa akışı ve öğrenme araçları gerçek DOM üzerinde çalışır', async ({ page }) => {
         await page.locator('#start-btn').click();
-        await expect(page.locator('#connection-text')).toHaveText('CANLI');
+        await expect(page.locator('#connection-text')).toHaveText('AKIŞ BEKLENİYOR');
         await expect(page.locator('#chart-empty')).toHaveClass(/hidden/);
         await expect(page.locator('#start-btn')).toBeDisabled();
         await expect(page.locator('#start-btn')).toHaveText('Çalışıyor');
         await expect(page.locator('#ticker-price')).toContainText('64,777.50');
         await expect(page.locator('#stop-btn')).toBeEnabled();
 
+        const socketUrls = await page.evaluate(() => window.__fakeSockets.map(socket => socket.url));
+        expect(socketUrls.some(url => url.includes('/market/stream?streams=btcusdt@aggTrade'))).toBe(true);
+        expect(socketUrls.some(url => url.includes('/public/stream?streams=btcusdt@depth20@100ms'))).toBe(true);
+
         await page.evaluate(() => {
-            window.app.handleMarketData('btcusdt@ticker', {
-                s: 'BTCUSDT', c: '65432.10', P: '2.75', q: '123456789'
+            const marketSocket = window.__fakeSockets.find(socket => socket.url.includes('/market/'));
+            const now = Date.now();
+            marketSocket.dispatch('message', {
+                data: JSON.stringify({
+                    stream: 'btcusdt@aggTrade',
+                    data: { e: 'aggTrade', E: now, T: now, s: 'BTCUSDT', p: '65431.90', q: '0.010', m: false }
+                })
             });
-            window.app.handleMarketData('btcusdt@depth20@100ms', {
+        });
+        await expect(page.locator('#ticker-price')).toContainText('65,431.90');
+        await expect(page.locator('#connection-text')).toHaveText('CANLI');
+
+        await page.evaluate(() => {
+            const marketSocket = window.__fakeSockets.find(socket => socket.url.includes('/market/'));
+            const depthSocket = window.__fakeSockets.find(socket => socket.url.includes('/public/'));
+            const send = (socket, stream, data) => socket.dispatch('message', {
+                data: JSON.stringify({ stream, data })
+            });
+            const now = Date.now();
+            send(marketSocket, 'btcusdt@aggTrade', {
+                e: 'aggTrade', E: now, T: now, s: 'BTCUSDT', p: '65432.10', q: '0.015', m: true
+            });
+            send(marketSocket, 'btcusdt@ticker', {
+                e: '24hrTicker', E: now + 10, s: 'BTCUSDT', c: '65432.00', P: '2.75', q: '123456789'
+            });
+            send(depthSocket, 'btcusdt@depth20@100ms', {
                 b: [['65430', '12'], ['65420', '8']],
                 a: [['65435', '10'], ['65445', '6']]
             });
         });
         await expect(page.locator('#ticker-price')).toContainText('65,432.10');
+        await expect(page.locator('#current-price')).toContainText('65,432.10');
         await expect(page.locator('#ticker-change')).toHaveText('+2.75%');
+        await expect.poll(() => page.evaluate(() => window.app.candles.at(-1)?.close)).toBe(65432.1);
+        await expect.poll(() => page.evaluate(() => window.app.lastTradePrice)).toBe(65432.1);
 
         await page.locator('#learning-mode').selectOption('shadow');
         await expect.poll(() => page.evaluate(() => window.app.adaptiveLearning.state.mode)).toBe('shadow');
@@ -221,6 +252,50 @@ test.describe('masaüstü uygulama akışı', () => {
         await expect(page.locator('#connection-text')).toHaveText('DURDURULDU');
         await expect(page.locator('#start-btn')).toBeEnabled();
         await expect(page.locator('#start-btn')).toHaveText('Sistemi Başlat');
+    });
+
+    test('REST erişilemezken routed trade akışı fiyatı ve canlı mumu başlatır', async ({ page }) => {
+        await page.route('https://fapi.binance.com/**', route => route.abort('connectionrefused'));
+        await page.locator('#start-btn').click();
+        await expect.poll(() => page.evaluate(() => window.__fakeSockets?.length || 0)).toBeGreaterThanOrEqual(2);
+        await expect(page.locator('#connection-text')).toHaveText('AKIŞ BEKLENİYOR');
+
+        await page.evaluate(() => {
+            const marketSocket = window.__fakeSockets.find(socket => socket.url.includes('/market/'));
+            const now = Date.now();
+            marketSocket.dispatch('message', {
+                data: JSON.stringify({
+                    stream: 'btcusdt@aggTrade',
+                    data: { e: 'aggTrade', E: now, T: now, s: 'BTCUSDT', p: '71234.50', q: '0.125', m: false }
+                })
+            });
+        });
+
+        await expect(page.locator('#ticker-price')).toContainText('71,234.50');
+        await expect(page.locator('#current-price')).toContainText('71,234.50');
+        await expect(page.locator('#connection-text')).toHaveText('CANLI');
+        await expect(page.locator('#chart-empty')).toHaveClass(/hidden/);
+        await expect.poll(() => page.evaluate(() => window.app.candles.at(-1)?.close)).toBe(71234.5);
+
+        await page.evaluate(() => {
+            const marketSocket = window.__fakeSockets.find(socket => socket.url.includes('/market/'));
+            const now = Date.now();
+            [71236.2, 71233.8, 71235.7].forEach((price, index) => {
+                marketSocket.dispatch('message', {
+                    data: JSON.stringify({
+                        stream: 'btcusdt@aggTrade',
+                        data: {
+                            e: 'aggTrade', E: now + index * 40, T: now + index * 40,
+                            s: 'BTCUSDT', p: String(price), q: '0.025', m: index % 2 === 0
+                        }
+                    })
+                });
+            });
+        });
+        await expect(page.locator('#ticker-price')).toContainText('71,235.70');
+        await expect.poll(() => page.evaluate(() => window.app.candles.at(-1)?.high)).toBe(71236.2);
+        await expect.poll(() => page.evaluate(() => window.app.candles.at(-1)?.low)).toBe(71233.8);
+        await page.screenshot({ path: 'test-results/audit-live-trade-rest-fallback.png', fullPage: true });
     });
 
     test('contributors modalı net katkı, yüzde ve aile tavanını gösterir', async ({ page }) => {
@@ -321,7 +396,8 @@ test.describe('mobil uygulama akışı', () => {
         });
         expect(chartLayout.seriesPrecision).toBe(2);
         expect(chartLayout.controlsRight).toBeLessThan(chartLayout.chartRight - chartLayout.priceScaleWidth - 8);
-        expect(chartLayout.visibleBars).toBeLessThanOrEqual(130);
+        expect(chartLayout.visibleBars).toBeGreaterThanOrEqual(50);
+        expect(chartLayout.visibleBars).toBeLessThanOrEqual(62);
         await page.screenshot({ path: 'test-results/audit-03-market-chart.png' });
         await page.evaluate(() => window.app.toggleTheme());
         await page.screenshot({ path: 'test-results/audit-03b-market-chart-light.png' });

@@ -69,6 +69,24 @@
         && value !== ''
         && Number.isFinite(Number(value));
 
+    const TIMEFRAME_MS = {
+        '1m': 60_000,
+        '5m': 5 * 60_000,
+        '15m': 15 * 60_000,
+        '1h': 60 * 60_000,
+        '4h': 4 * 60 * 60_000
+    };
+
+    async function fetchWithTimeout(url, timeoutMs = 8000) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, { signal: controller.signal, cache: 'no-store' });
+        } finally {
+            window.clearTimeout(timer);
+        }
+    }
+
     class ChartManager {
         constructor(containerId) {
             this.container = document.getElementById(containerId);
@@ -167,15 +185,21 @@
 
         focusLatest() {
             if (!this.dataLength) return;
-            const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 720px)').matches;
-            if (!isMobile) {
-                this.chart.timeScale().fitContent();
-                return;
-            }
-            const visibleBars = Math.min(120, this.dataLength);
+            const width = this.container.clientWidth || window.innerWidth || 390;
+            const targetBars = width <= 360
+                ? 42
+                : width <= 480
+                    ? 54
+                    : width <= 720
+                        ? 72
+                        : width <= 1100
+                            ? 110
+                            : 150;
+            const visibleBars = Math.min(targetBars, this.dataLength);
+            const rightOffset = width <= 480 ? 4 : 7;
             this.chart.timeScale().setVisibleLogicalRange({
                 from: Math.max(0, this.dataLength - visibleBars),
-                to: this.dataLength + 6
+                to: this.dataLength + rightOffset
             });
         }
 
@@ -725,8 +749,16 @@
             this.strategies = {};
             this.activeStrategies = {};
             this.socket = null;
+            this.depthSocket = null;
             this.reconnectTimer = null;
+            this.depthReconnectTimer = null;
             this.reconnectAttempts = 0;
+            this.depthReconnectAttempts = 0;
+            this.lastMarketMessageAt = 0;
+            this.lastTradeAt = 0;
+            this.lastTradePrice = null;
+            this.priceRenderFrame = null;
+            this.connectionWatchTimer = null;
             this.renderTimer = null;
             this.analysisTimer = null;
             this.isRunning = false;
@@ -964,15 +996,21 @@
             this.notify('Sistem başlatılıyor; öğrenme durumu ve piyasa verisi yükleniyor.', 'success');
 
             await this.learningReady;
-            await this.fetchInitialData();
             if (!this.isRunning) return;
+
+            // Gerçek zamanlı akış REST geçmiş verisini beklemez. Böylece REST bölgesel
+            // olarak yavaş veya erişilemez olsa bile trade fiyatı ve canlı mum başlar.
+            const initialRequestStartedAt = Date.now();
             this.connectWebSocket(false);
-            this.renderTimer = window.setInterval(() => this.renderPrice(), 250);
+            this.startConnectionWatch();
+            await this.fetchInitialData(initialRequestStartedAt);
+            if (!this.isRunning) return;
+            this.renderTimer = window.setInterval(() => this.renderPrice(), 1000);
             this.analysisTimer = window.setInterval(() => this.runPeriodicAnalysis(), 5000);
         }
 
         stop(options = {}) {
-            if (!this.isRunning && !this.socket) return;
+            if (!this.isRunning && !this.socket && !this.depthSocket) return;
             this.isRunning = false;
             const startButton = document.getElementById('start-btn');
             startButton.disabled = false;
@@ -980,8 +1018,12 @@
             document.getElementById('stop-btn').disabled = true;
             window.clearInterval(this.renderTimer);
             window.clearInterval(this.analysisTimer);
+            window.clearInterval(this.connectionWatchTimer);
+            if (this.priceRenderFrame !== null) window.cancelAnimationFrame(this.priceRenderFrame);
             this.renderTimer = null;
             this.analysisTimer = null;
+            this.connectionWatchTimer = null;
+            this.priceRenderFrame = null;
             this.disconnectWebSocket();
             this.updateConnection(false, 'DURDURULDU');
             if (!options.silent) this.notify('Sistem durduruldu.', 'warning');
@@ -1007,6 +1049,9 @@
             this.candles = [];
             this.orderBook = { bids: [], asks: [] };
             this.marketData = { price: null, btcPrice: null, change24h: null, volume24h: null };
+            this.lastMarketMessageAt = 0;
+            this.lastTradeAt = 0;
+            this.lastTradePrice = null;
             this.indicators = { rsi: [], atr: null, sma20: null, sma50: null, vwap: null };
             this.chartManager.setData([]);
             this.chartManager.setSignalMarkers([]);
@@ -1017,81 +1062,124 @@
             this.renderAll();
         }
 
-        async fetchInitialData() {
-            try {
-                const endpoint = `https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(this.currentSymbol)}&interval=${encodeURIComponent(this.currentTimeframe)}&limit=500`;
-                const tickerEndpoint = `https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${encodeURIComponent(this.currentSymbol)}`;
-                const [response, tickerResponse] = await Promise.all([
-                    fetch(endpoint),
-                    fetch(tickerEndpoint).catch(() => null)
-                ]);
-                if (!response.ok) throw new Error(`Binance HTTP ${response.status}`);
-                const rows = await response.json();
-                if (!Array.isArray(rows)) throw new Error('Beklenmeyen Binance yanıtı');
-                const now = Date.now();
-                this.candles = rows.map(row => ({
-                    time: Number(row[0]),
-                    closeTime: Number(row[6]),
-                    open: Number(row[1]),
-                    high: Number(row[2]),
-                    low: Number(row[3]),
-                    close: Number(row[4]),
-                    volume: Number(row[5]),
-                    closed: Number(row[6]) < now
-                }));
-                let tickerData = null;
-                if (tickerResponse && tickerResponse.ok) {
-                    try {
-                        const payload = await tickerResponse.json();
-                        if (payload && !Array.isArray(payload)) tickerData = payload;
-                    } catch (error) {
-                        console.warn('24 saat ticker verisi okunamadı:', error);
+        async fetchInitialData(requestStartedAt = Date.now()) {
+            const requestedSymbol = this.currentSymbol;
+            const requestedTimeframe = this.currentTimeframe;
+            const symbol = encodeURIComponent(requestedSymbol);
+            const timeframe = encodeURIComponent(requestedTimeframe);
+            const candlesEndpoint = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=500`;
+            const tickerEndpoint = `https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`;
+            const [candlesResult, tickerResult] = await Promise.allSettled([
+                fetchWithTimeout(candlesEndpoint),
+                fetchWithTimeout(tickerEndpoint)
+            ]);
+            if (!this.isRunning || requestedSymbol !== this.currentSymbol || requestedTimeframe !== this.currentTimeframe) return;
+
+            let loadedHistory = false;
+            if (candlesResult.status === 'fulfilled' && candlesResult.value.ok) {
+                try {
+                    const rows = await candlesResult.value.json();
+                    if (!Array.isArray(rows)) throw new Error('Beklenmeyen Binance yanıtı');
+                    const now = Date.now();
+                    const streamedCandle = this.lastMarketMessageAt > requestStartedAt
+                        ? this.candles.at(-1)
+                        : null;
+                    this.candles = rows.map(row => ({
+                        time: Number(row[0]),
+                        closeTime: Number(row[6]),
+                        open: Number(row[1]),
+                        high: Number(row[2]),
+                        low: Number(row[3]),
+                        close: Number(row[4]),
+                        volume: Number(row[5]),
+                        closed: Number(row[6]) < now
+                    }));
+                    if (streamedCandle && streamedCandle.time >= (this.candles.at(-1)?.time || 0)) {
+                        this.upsertCandle(streamedCandle);
                     }
+                    if (this.lastTradeAt > requestStartedAt && finite(this.lastTradePrice)) {
+                        this.mergeTradeIntoCandle(this.lastTradePrice, this.lastTradeAt, 0, false);
+                    }
+                    this.calculateIndicators();
+                    this.chartManager.setData(this.candles);
+                    this.chartManager.setSignalMarkers(this.signals.filter(signal => signal.symbol === this.currentSymbol));
+                    document.getElementById('chart-empty').classList.toggle('hidden', this.candles.length > 0);
+                    loadedHistory = true;
+                } catch (error) {
+                    console.warn('Geçmiş mum verisi okunamadı:', error);
                 }
-                const latestCandle = this.candles.at(-1);
-                if (tickerData && finite(tickerData.c)) {
-                    this.marketData.price = Number(tickerData.c);
-                    this.marketData.change24h = finite(tickerData.P) ? Number(tickerData.P) : null;
-                    this.marketData.volume24h = finite(tickerData.q) ? Number(tickerData.q) : null;
-                } else if (latestCandle && finite(latestCandle.close)) {
-                    // WebSocket ticker mesajından önce fiyat kartının boş kalmasını önler.
-                    this.marketData.price = Number(latestCandle.close);
+            }
+
+            let tickerData = null;
+            if (tickerResult.status === 'fulfilled' && tickerResult.value.ok) {
+                try {
+                    const payload = await tickerResult.value.json();
+                    if (payload && !Array.isArray(payload)) tickerData = payload;
+                } catch (error) {
+                    console.warn('24 saat ticker verisi okunamadı:', error);
                 }
-                if (this.currentSymbol === 'BTCUSDT' && finite(this.marketData.price)) {
-                    this.marketData.btcPrice = this.marketData.price;
+            }
+
+            if (tickerData) {
+                this.marketData.change24h = finite(tickerData.P) ? Number(tickerData.P) : this.marketData.change24h;
+                this.marketData.volume24h = finite(tickerData.q) ? Number(tickerData.q) : this.marketData.volume24h;
+                if (this.lastTradeAt <= requestStartedAt && finite(tickerData.c)) {
+                    this.setLivePrice(Number(tickerData.c), Date.now(), 'rest', { updateCandle: false });
                 }
-                this.calculateIndicators();
-                this.renderPrice();
-                this.chartManager.setData(this.candles);
-                this.chartManager.setSignalMarkers(this.signals.filter(signal => signal.symbol === this.currentSymbol));
-                document.getElementById('chart-empty').classList.toggle('hidden', this.candles.length > 0);
-            } catch (error) {
-                console.error(error);
-                this.notify(`Geçmiş veri alınamadı: ${error.message}`, 'danger');
+            }
+
+            const latestCandle = this.candles.at(-1);
+            if (!finite(this.marketData.price) && latestCandle && finite(latestCandle.close)) {
+                this.setLivePrice(Number(latestCandle.close), Date.now(), 'rest', { updateCandle: false });
+            }
+            if (this.currentSymbol === 'BTCUSDT' && finite(this.marketData.price)) {
+                this.marketData.btcPrice = this.marketData.price;
+            }
+            this.renderPrice();
+
+            if (!loadedHistory) {
+                const reason = candlesResult.status === 'rejected'
+                    ? candlesResult.reason?.message
+                    : `Binance HTTP ${candlesResult.value?.status || 'hatası'}`;
+                console.warn('Geçmiş veri alınamadı:', reason);
+                this.notify('Geçmiş mumlar yüklenemedi; canlı trade akışıyla devam ediliyor.', 'warning');
             }
         }
 
         connectWebSocket(isReconnect) {
             if (!this.isRunning) return;
-            this.disconnectWebSocket(false);
+            this.disconnectWebSocket();
             if (!isReconnect) this.reconnectAttempts = 0;
 
             const lower = this.currentSymbol.toLowerCase();
-            const streams = [`${lower}@ticker`, `${lower}@depth20@100ms`, `${lower}@aggTrade`, `${lower}@kline_${this.currentTimeframe}`];
-            if (lower !== 'btcusdt') streams.push('btcusdt@ticker');
-            const socket = new WebSocket(`wss://fstream.binance.com/stream?streams=${streams.join('/')}`);
+            const marketStreams = [
+                `${lower}@aggTrade`,
+                `${lower}@ticker`,
+                `${lower}@kline_${this.currentTimeframe}`
+            ];
+            if (lower !== 'btcusdt') marketStreams.push('btcusdt@aggTrade');
+
+            // Binance, 23 Nisan 2026'da eski yönlendirilmemiş /stream adresini
+            // kapattı. Trade/kline/ticker artık /market yolundan bağlanmalıdır.
+            const socket = new WebSocket(
+                `wss://fstream.binance.com/market/stream?streams=${marketStreams.join('/')}`
+            );
             this.socket = socket;
+            this.marketSocketOpenedAt = Date.now();
 
             socket.addEventListener('open', () => {
                 if (socket !== this.socket) return;
                 this.reconnectAttempts = 0;
+                this.marketSocketOpenedAt = Date.now();
                 document.getElementById('start-btn').textContent = 'Çalışıyor';
-                this.updateConnection(true, 'CANLI');
+                this.updateConnection(false, 'AKIŞ BEKLENİYOR');
             });
             socket.addEventListener('message', event => {
                 if (socket !== this.socket) return;
                 try {
                     const message = JSON.parse(event.data);
+                    this.lastMarketMessageAt = Date.now();
+                    this.updateConnection(true, 'CANLI');
                     this.handleMarketData(message.stream, message.data);
                 } catch (error) {
                     console.error('WebSocket verisi işlenemedi:', error);
@@ -1103,22 +1191,79 @@
             socket.addEventListener('close', () => {
                 if (socket !== this.socket || !this.isRunning) return;
                 this.socket = null;
+                this.closeDepthSocket();
                 this.reconnectAttempts += 1;
                 const delay = Math.min(30000, 3000 * 2 ** Math.min(this.reconnectAttempts - 1, 4));
                 this.updateConnection(false, `${Math.round(delay / 1000)} SN SONRA TEKRAR`);
                 this.reconnectTimer = window.setTimeout(() => this.connectWebSocket(true), delay);
             });
+
+            this.connectDepthWebSocket();
         }
 
-        disconnectWebSocket(clearReference = true) {
-            window.clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
-            const socket = this.socket;
-            if (clearReference) this.socket = null;
-            if (socket) {
-                socket.onclose = null;
-                if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close(1000, 'İstemci kapattı');
+        connectDepthWebSocket() {
+            if (!this.isRunning) return;
+            window.clearTimeout(this.depthReconnectTimer);
+            this.depthReconnectTimer = null;
+            this.closeDepthSocket();
+
+            const lower = this.currentSymbol.toLowerCase();
+            const socket = new WebSocket(
+                `wss://fstream.binance.com/public/stream?streams=${lower}@depth20@100ms`
+            );
+            this.depthSocket = socket;
+
+            socket.addEventListener('open', () => {
+                if (socket === this.depthSocket) this.depthReconnectAttempts = 0;
+            });
+            socket.addEventListener('message', event => {
+                if (socket !== this.depthSocket) return;
+                try {
+                    const message = JSON.parse(event.data);
+                    this.handleMarketData(message.stream, message.data);
+                } catch (error) {
+                    console.error('Depth WebSocket verisi işlenemedi:', error);
+                }
+            });
+            socket.addEventListener('close', () => {
+                if (socket !== this.depthSocket || !this.isRunning || !this.socket) return;
+                this.depthSocket = null;
+                this.depthReconnectAttempts += 1;
+                const delay = Math.min(30000, 3000 * 2 ** Math.min(this.depthReconnectAttempts - 1, 4));
+                this.depthReconnectTimer = window.setTimeout(() => this.connectDepthWebSocket(), delay);
+            });
+        }
+
+        closeDepthSocket() {
+            const socket = this.depthSocket;
+            this.depthSocket = null;
+            if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+                socket.close(1000, 'İstemci kapattı');
             }
+        }
+
+        disconnectWebSocket() {
+            window.clearTimeout(this.reconnectTimer);
+            window.clearTimeout(this.depthReconnectTimer);
+            this.reconnectTimer = null;
+            this.depthReconnectTimer = null;
+            const socket = this.socket;
+            this.socket = null;
+            this.closeDepthSocket();
+            if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+                socket.close(1000, 'İstemci kapattı');
+            }
+        }
+
+        startConnectionWatch() {
+            window.clearInterval(this.connectionWatchTimer);
+            this.connectionWatchTimer = window.setInterval(() => {
+                if (!this.isRunning || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+                const lastActivity = this.lastMarketMessageAt || this.marketSocketOpenedAt || Date.now();
+                if (Date.now() - lastActivity <= 8000) return;
+                this.updateConnection(false, 'VERİ AKIŞI BEKLENİYOR');
+                this.socket.close(4000, 'Piyasa verisi zaman aşımı');
+            }, 2000);
         }
 
         handleMarketData(stream, data) {
@@ -1126,14 +1271,17 @@
             const streamType = stream.split('@')[1] || '';
 
             if (streamType === 'ticker') {
-                if (data.s === 'BTCUSDT') this.marketData.btcPrice = Number(data.c);
+                if (data.s === 'BTCUSDT' && finite(data.c)) this.marketData.btcPrice = Number(data.c);
                 if (data.s === this.currentSymbol) {
-                    this.marketData.price = Number(data.c);
-                    this.marketData.change24h = Number(data.P);
-                    this.marketData.volume24h = Number(data.q);
-                    this.adaptiveLearning.onPrice(this.currentSymbol, this.marketData.price);
-                    this.checkAutoCloseSignals();
-                    this.renderPrice();
+                    this.marketData.change24h = finite(data.P) ? Number(data.P) : this.marketData.change24h;
+                    this.marketData.volume24h = finite(data.q) ? Number(data.q) : this.marketData.volume24h;
+                    // 24s ticker yalnızca istatistik kaynağıdır. Trade akışı birkaç saniye
+                    // sessiz kalırsa düşük hacimli pariteler için son fiyat yedeği olur.
+                    if (Date.now() - this.lastTradeAt > 3000 && finite(data.c)) {
+                        this.setLivePrice(Number(data.c), Number(data.E) || Date.now(), 'ticker');
+                    } else {
+                        this.queuePriceRender();
+                    }
                 }
                 return;
             }
@@ -1151,6 +1299,7 @@
 
             if (streamType.startsWith('kline')) {
                 const kline = data.k;
+                if (!kline) return;
                 const candle = {
                     time: Number(kline.t),
                     closeTime: Number(kline.T),
@@ -1162,7 +1311,12 @@
                     closed: Boolean(kline.x)
                 };
                 this.upsertCandle(candle);
+                this.chartManager.dataLength = this.candles.length;
                 this.chartManager.updateRealtime(candle);
+                document.getElementById('chart-empty').classList.add('hidden');
+                if (Date.now() - this.lastTradeAt > 1500) {
+                    this.setLivePrice(candle.close, Number(data.E) || Date.now(), 'kline', { updateCandle: false });
+                }
                 if (candle.closed) this.calculateIndicators();
                 this.checkAutoCloseSignals();
                 return;
@@ -1173,10 +1327,86 @@
                     price: Number(data.p),
                     quantity: Number(data.q),
                     isBuyerMaker: Boolean(data.m),
-                    timestamp: Number(data.T)
+                    timestamp: Number(data.T) || Number(data.E) || Date.now()
                 };
+                if (!finite(trade.price)) return;
+                if (data.s === 'BTCUSDT') this.marketData.btcPrice = trade.price;
+                if (data.s !== this.currentSymbol) return;
+                this.setLivePrice(trade.price, trade.timestamp, 'aggTrade', { quantity: trade.quantity });
                 Object.values(this.strategies).forEach(strategy => strategy.processTrade(trade));
             }
+        }
+
+        setLivePrice(price, timestamp = Date.now(), source = 'stream', options = {}) {
+            if (!finite(price)) return;
+            const numericPrice = Number(price);
+            const eventTime = finite(timestamp) ? Number(timestamp) : Date.now();
+            this.marketData.price = numericPrice;
+            if (this.currentSymbol === 'BTCUSDT') this.marketData.btcPrice = numericPrice;
+
+            if (source === 'aggTrade') {
+                this.lastTradeAt = eventTime;
+                this.lastTradePrice = numericPrice;
+            }
+            if (options.updateCandle !== false) {
+                this.mergeTradeIntoCandle(numericPrice, eventTime, Number(options.quantity) || 0, true);
+            }
+
+            this.adaptiveLearning.onPrice(this.currentSymbol, numericPrice);
+            this.checkAutoCloseSignals();
+            this.queuePriceRender();
+        }
+
+        mergeTradeIntoCandle(price, timestamp, quantity = 0, updateChart = true) {
+            const interval = TIMEFRAME_MS[this.currentTimeframe] || TIMEFRAME_MS['15m'];
+            const candleTime = Math.floor(timestamp / interval) * interval;
+            const closeTime = candleTime + interval - 1;
+            const last = this.candles.at(-1);
+            let candle;
+            let closedPrevious = false;
+
+            if (!last || candleTime > last.time) {
+                if (last && !last.closed) {
+                    last.closed = true;
+                    closedPrevious = true;
+                }
+                candle = {
+                    time: candleTime,
+                    closeTime,
+                    open: price,
+                    high: price,
+                    low: price,
+                    close: price,
+                    volume: Math.max(0, quantity),
+                    closed: false
+                };
+            } else if (last.time === candleTime) {
+                candle = {
+                    ...last,
+                    closeTime,
+                    high: Math.max(Number(last.high), price),
+                    low: Math.min(Number(last.low), price),
+                    close: price,
+                    closed: false
+                };
+            } else {
+                return null;
+            }
+
+            this.upsertCandle(candle);
+            this.chartManager.dataLength = this.candles.length;
+            if (updateChart) this.chartManager.updateRealtime(candle);
+            document.getElementById('chart-empty').classList.add('hidden');
+            if (closedPrevious) this.calculateIndicators();
+            return candle;
+        }
+
+        queuePriceRender() {
+            if (this.priceRenderFrame !== null) return;
+            this.priceRenderFrame = window.requestAnimationFrame(() => {
+                this.priceRenderFrame = null;
+                this.renderPrice();
+            });
         }
 
         upsertCandle(candle) {
@@ -1860,7 +2090,7 @@
         try {
             window.app = new TradingScannerApp();
             if ('serviceWorker' in navigator && window.isSecureContext) {
-                navigator.serviceWorker.register('./sw.js?v=5').catch(error => {
+                navigator.serviceWorker.register('./sw.js?v=6').catch(error => {
                     console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
                 });
             }
