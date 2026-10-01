@@ -28,14 +28,33 @@
     };
 
     class EventBus {
-        constructor() {
+        constructor(options = {}) {
             this.listeners = new Map();
+            this.anyListeners = new Set();
+            this.sequence = 0;
+            this.historyLimit = Math.max(0, Number(options.historyLimit) || 200);
+            this.history = [];
+            this.dispatchQueue = [];
+            this.isDispatching = false;
         }
 
         on(eventName, handler) {
             if (!this.listeners.has(eventName)) this.listeners.set(eventName, new Set());
             this.listeners.get(eventName).add(handler);
             return () => this.off(eventName, handler);
+        }
+
+        once(eventName, handler) {
+            const unsubscribe = this.on(eventName, payload => {
+                unsubscribe();
+                handler(payload);
+            });
+            return unsubscribe;
+        }
+
+        onAny(handler) {
+            this.anyListeners.add(handler);
+            return () => this.anyListeners.delete(handler);
         }
 
         off(eventName, handler) {
@@ -46,12 +65,49 @@
         }
 
         emit(eventName, payload) {
-            const handlers = this.listeners.get(eventName);
-            if (!handlers) return;
-            handlers.forEach(handler => {
-                try { handler(payload); }
-                catch (error) { console.error(`[EventBus:${eventName}]`, error); }
-            });
+            const envelope = {
+                id: ++this.sequence,
+                event: eventName,
+                timestamp: Date.now(),
+                payload
+            };
+            if (this.historyLimit > 0) {
+                this.history.push(envelope);
+                if (this.history.length > this.historyLimit) {
+                    this.history.splice(0, this.history.length - this.historyLimit);
+                }
+            }
+
+            this.dispatchQueue.push({ eventName, payload, envelope });
+            if (this.isDispatching) return envelope;
+
+            this.isDispatching = true;
+            try {
+                while (this.dispatchQueue.length > 0) {
+                    const next = this.dispatchQueue.shift();
+                    const handlers = this.listeners.get(next.eventName);
+                    if (handlers) {
+                        [...handlers].forEach(handler => {
+                            try { handler(next.payload, next.envelope); }
+                            catch (error) { console.error(`[EventBus:${next.eventName}]`, error); }
+                        });
+                    }
+                    [...this.anyListeners].forEach(handler => {
+                        try { handler(next.envelope); }
+                        catch (error) { console.error(`[EventBus:*:${next.eventName}]`, error); }
+                    });
+                }
+            } finally {
+                this.isDispatching = false;
+            }
+            return envelope;
+        }
+
+        recent(eventName = null, limit = 20) {
+            const events = eventName
+                ? this.history.filter(envelope => envelope.event === eventName)
+                : this.history;
+            return events.slice(-Math.max(0, Number(limit) || 0));
         }
     }
 
@@ -284,6 +340,7 @@
         bindEvents() {
             this.eventBus.on('signal.closed', payload => this.recordLiveSignal(payload.signal, payload.price));
             this.eventBus.on('signal.blocked', payload => this.recordBlocked(payload));
+            this.eventBus.on('market.price', payload => this.onPrice(payload.symbol, payload.price));
             this.eventBus.on('market.regime.check', () => this.refreshRegime());
         }
 

@@ -16,11 +16,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=10">
+    <link rel="stylesheet" href="./styles.css?v=11">
     <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script defer src="./src/adaptive-learning.js?v=10"></script>
-    <script defer src="./src/confluence-engine.js?v=10"></script>
-    <script defer src="./src/app.js?v=10"></script>
+    <script defer src="./src/adaptive-learning.js?v=11"></script>
+    <script defer src="./src/confluence-engine.js?v=11"></script>
+    <script defer src="./src/app.js?v=11"></script>
 </head>
 <body data-mobile-view="home">
     <noscript>Bu uygulamayı kullanmak için JavaScript etkin olmalıdır.</noscript>
@@ -100,6 +100,38 @@
                     <strong id="atr-value">—</strong>
                 </article>
             </div>
+
+            <section class="command-stream" aria-labelledby="command-stream-title">
+                <div class="command-stream-heading">
+                    <div>
+                        <span class="eyebrow">OLAY OMURGASI</span>
+                        <strong id="command-stream-title">Canlı Komuta Akışı</strong>
+                    </div>
+                    <span id="command-health" class="stream-health waiting" role="status" aria-live="polite">BEKLEMEDE</span>
+                </div>
+                <div class="command-stream-grid">
+                    <article>
+                        <span>Trade akışı</span>
+                        <strong id="command-trade-rate">0.0/sn</strong>
+                        <small id="command-trade-age">Veri yok</small>
+                    </article>
+                    <article>
+                        <span>Mum / Derinlik</span>
+                        <strong id="command-market-sync">0 / 0</strong>
+                        <small id="command-market-age">Bekleniyor</small>
+                    </article>
+                    <article>
+                        <span>Strateji motoru</span>
+                        <strong id="command-strategy-state">0 / 0</strong>
+                        <small id="command-proposal-count">0 teklif</small>
+                    </article>
+                    <article>
+                        <span>Son karar</span>
+                        <strong id="command-decision">BEKLEMEDE</strong>
+                        <small id="command-event-sequence">Olay #0</small>
+                    </article>
+                </div>
+            </section>
         </section>
 
         <section class="workspace">

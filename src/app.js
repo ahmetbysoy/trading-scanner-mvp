@@ -757,20 +757,47 @@
             this.lastMarketMessageAt = 0;
             this.lastTradeAt = 0;
             this.lastTradePrice = null;
+            this.lastClosedCandleEventTime = 0;
             this.priceRenderFrame = null;
+            this.commandRenderFrame = null;
             this.connectionWatchTimer = null;
+            this.commandCenterTimer = null;
             this.renderTimer = null;
             this.analysisTimer = null;
             this.isRunning = false;
+            this.commandTelemetry = {
+                eventSequence: 0,
+                tradeCount: 0,
+                tradesInWindow: 0,
+                recentTradeTimes: [],
+                tradeRate: 0,
+                depthCount: 0,
+                klineCount: 0,
+                closedCandleCount: 0,
+                indicatorUpdates: 0,
+                analysisCycles: 0,
+                proposalCount: 0,
+                confluenceCount: 0,
+                signalCount: 0,
+                strategyErrors: 0,
+                lastTradeAt: 0,
+                lastDepthAt: 0,
+                lastKlineAt: 0,
+                lastProposalAt: 0,
+                lastDecision: 'BEKLEMEDE',
+                lastDecisionAt: 0,
+                lastRateSampleAt: Date.now()
+            };
 
             this.applySavedTheme();
             this.chartManager = new ChartManager('live-chart');
             this.heatmapManager = new HeatmapManager('orderbook-heatmap');
             if (!window.UTCAdaptive) throw new Error('Adaptif öğrenme modülü yüklenemedi.');
-            this.eventBus = new window.UTCAdaptive.EventBus();
+            this.eventBus = new window.UTCAdaptive.EventBus({ historyLimit: 400 });
             this.adaptiveLearning = new window.UTCAdaptive.AdaptiveLearningEngine(this, { eventBus: this.eventBus });
             this.confluenceEngine = new window.ConfluenceEngine(this);
             this.initStrategies();
+            this.bindCommandCenterEvents();
             this.learningReady = this.adaptiveLearning.initialize();
             this.bindLearningEvents();
             this.bindEvents();
@@ -780,6 +807,7 @@
             this.renderAll();
             this.renderSafetyChips();
             this.renderLearning();
+            this.renderCommandCenter();
         }
 
         defaultSettings() {
@@ -850,6 +878,216 @@
             Object.entries(this.strategies).forEach(([key, strategy]) => {
                 if (this.settings.activeStrategies[key]) this.activeStrategies[key] = strategy;
             });
+            this.queueCommandCenterRender();
+        }
+
+        bindCommandCenterEvents() {
+            this.eventBus.onAny(envelope => {
+                this.commandTelemetry.eventSequence = envelope.id;
+                if (!['market.trade', 'market.price', 'market.orderbook', 'market.candle.updated'].includes(envelope.event)) {
+                    this.queueCommandCenterRender();
+                }
+            });
+
+            this.eventBus.on('market.price', payload => {
+                if (!payload || payload.symbol !== this.currentSymbol) return;
+                this.checkAutoCloseSignals();
+                this.queuePriceRender();
+            });
+            this.eventBus.on('market.ticker', payload => {
+                if (!payload || payload.symbol !== this.currentSymbol) return;
+                this.queuePriceRender();
+            });
+            this.eventBus.on('market.candle.updated', payload => {
+                if (!payload || payload.symbol !== this.currentSymbol || !payload.candle) return;
+                this.chartManager.dataLength = this.candles.length;
+                this.chartManager.updateRealtime(payload.candle);
+                document.getElementById('chart-empty').classList.add('hidden');
+            });
+            this.eventBus.on('market.trade', payload => {
+                if (!payload || payload.symbol !== this.currentSymbol) return;
+                this.dispatchStrategies('processTrade', payload.trade, 'market.trade');
+            });
+            this.eventBus.on('market.orderbook', payload => {
+                if (!payload || payload.symbol !== this.currentSymbol) return;
+                this.heatmapManager.draw(payload.orderBook, this.marketData.price);
+                document.getElementById('heatmap-empty').classList.toggle('hidden', payload.orderBook.bids.length > 0);
+                this.dispatchStrategies('analyzeOrderBook', payload.orderBook, 'market.orderbook');
+            });
+            this.eventBus.on('analysis.tick', payload => {
+                if (!this.isRunning || (payload?.symbol && payload.symbol !== this.currentSymbol)) return;
+                this.commandTelemetry.analysisCycles += 1;
+                this.dispatchStrategies('periodicAnalyze', payload, 'analysis.tick');
+            });
+            this.eventBus.on('market.candle.closed', payload => {
+                if (!payload || payload.symbol !== this.currentSymbol) return;
+                this.eventBus.emit('market.regime.check', {
+                    symbol: payload.symbol,
+                    timeframe: payload.timeframe,
+                    trigger: 'candle-close'
+                });
+                this.eventBus.emit('analysis.tick', {
+                    symbol: payload.symbol,
+                    timeframe: payload.timeframe,
+                    trigger: 'candle-close'
+                });
+            });
+            this.eventBus.on('proposal.created', () => {
+                this.commandTelemetry.proposalCount += 1;
+                this.commandTelemetry.lastProposalAt = Date.now();
+            });
+            this.eventBus.on('confluence.evaluated', result => {
+                this.commandTelemetry.confluenceCount += 1;
+                this.commandTelemetry.lastDecision = this.decisionLabel(result?.status);
+                this.commandTelemetry.lastDecisionAt = Date.now();
+            });
+            this.eventBus.on('signal.generated', () => {
+                this.commandTelemetry.signalCount += 1;
+                this.commandTelemetry.lastDecision = 'SİNYAL ÜRETİLDİ';
+                this.commandTelemetry.lastDecisionAt = Date.now();
+            });
+            this.eventBus.on('signal.blocked', payload => {
+                this.commandTelemetry.lastDecision = `ENGEL: ${this.decisionLabel(payload?.reason)}`;
+                this.commandTelemetry.lastDecisionAt = Date.now();
+            });
+            this.eventBus.on('strategy.error', payload => {
+                this.commandTelemetry.strategyErrors += 1;
+                this.commandTelemetry.lastDecision = `HATA: ${payload?.strategy || 'STRATEJİ'}`;
+                this.commandTelemetry.lastDecisionAt = Date.now();
+            });
+        }
+
+        dispatchStrategies(method, payload, sourceEvent) {
+            Object.values(this.strategies).forEach(strategy => {
+                if (typeof strategy[method] !== 'function') return;
+                try {
+                    strategy[method](payload);
+                } catch (error) {
+                    console.error(`[Strategy:${strategy.name}:${method}]`, error);
+                    this.eventBus.emit('strategy.error', {
+                        strategy: strategy.name,
+                        method,
+                        sourceEvent,
+                        message: error.message,
+                        timestamp: Date.now()
+                    });
+                }
+            });
+        }
+
+        resetCommandTelemetry() {
+            Object.assign(this.commandTelemetry, {
+                tradeCount: 0,
+                tradesInWindow: 0,
+                recentTradeTimes: [],
+                tradeRate: 0,
+                depthCount: 0,
+                klineCount: 0,
+                closedCandleCount: 0,
+                indicatorUpdates: 0,
+                analysisCycles: 0,
+                proposalCount: 0,
+                confluenceCount: 0,
+                signalCount: 0,
+                strategyErrors: 0,
+                lastTradeAt: 0,
+                lastDepthAt: 0,
+                lastKlineAt: 0,
+                lastProposalAt: 0,
+                lastDecision: 'BEKLEMEDE',
+                lastDecisionAt: 0,
+                lastRateSampleAt: Date.now()
+            });
+            this.renderCommandCenter();
+        }
+
+        startCommandCenterClock() {
+            window.clearInterval(this.commandCenterTimer);
+            this.commandTelemetry.lastRateSampleAt = Date.now();
+            this.commandCenterTimer = window.setInterval(() => {
+                const now = Date.now();
+                this.commandTelemetry.recentTradeTimes = this.commandTelemetry.recentTradeTimes
+                    .filter(timestamp => now - timestamp <= 5000);
+                const oldest = this.commandTelemetry.recentTradeTimes[0] || now;
+                const windowSeconds = Math.min(5, Math.max((now - oldest) / 1000, 1));
+                this.commandTelemetry.tradeRate = this.commandTelemetry.recentTradeTimes.length / windowSeconds;
+                this.commandTelemetry.tradesInWindow = 0;
+                this.commandTelemetry.lastRateSampleAt = now;
+                this.renderCommandCenter();
+            }, 1000);
+        }
+
+        queueCommandCenterRender() {
+            if (this.commandRenderFrame !== null || typeof window.requestAnimationFrame !== 'function') return;
+            this.commandRenderFrame = -1;
+            const frame = window.requestAnimationFrame(() => {
+                this.commandRenderFrame = null;
+                this.renderCommandCenter();
+            });
+            if (this.commandRenderFrame !== null) this.commandRenderFrame = frame;
+        }
+
+        decisionLabel(status) {
+            const labels = {
+                empty: 'TEKLİF YOK',
+                conflict: 'ÇATIŞMA',
+                'below-threshold': 'EŞİK ALTI',
+                'awaiting-confirmation': 'TEYİT BEKLİYOR',
+                'awaiting-family-diversity': 'AİLE TEYİDİ',
+                'awaiting-conviction': 'KARAR OLUŞUYOR',
+                generated: 'SİNYAL ÜRETİLDİ',
+                signal: 'SİNYAL',
+                'active-signal-lock': 'AKTİF KİLİT',
+                'signal-cooldown': 'COOLDOWN',
+                'same-direction-cooldown': 'YÖN COOLDOWN'
+            };
+            return labels[status] || String(status || 'BEKLEMEDE').replaceAll('-', ' ').toUpperCase();
+        }
+
+        ageLabel(timestamp) {
+            if (!timestamp) return 'Veri yok';
+            const ageMs = Math.max(0, Date.now() - timestamp);
+            if (ageMs < 1000) return `${Math.max(0, Math.round(ageMs))} ms`;
+            return `${(ageMs / 1000).toFixed(ageMs < 10_000 ? 1 : 0)} sn`;
+        }
+
+        renderCommandCenter() {
+            const health = document.getElementById('command-health');
+            if (!health) return;
+            const telemetry = this.commandTelemetry;
+            const tradeAge = telemetry.lastTradeAt ? Date.now() - telemetry.lastTradeAt : Infinity;
+            const marketAge = telemetry.lastKlineAt ? Date.now() - telemetry.lastKlineAt : Infinity;
+            const depthAge = telemetry.lastDepthAt ? Date.now() - telemetry.lastDepthAt : Infinity;
+            let healthText = 'BEKLEMEDE';
+            let healthClass = 'waiting';
+            if (!this.isRunning) {
+                healthText = 'DURDURULDU';
+            } else if (telemetry.strategyErrors > 0) {
+                healthText = 'STRATEJİ HATASI';
+                healthClass = 'degraded';
+            } else if (tradeAge < 3000 && marketAge < 5000 && depthAge < 5000) {
+                healthText = 'TÜM SİSTEM CANLI';
+                healthClass = 'live';
+            } else if (tradeAge < 5000 || marketAge < 5000) {
+                healthText = 'KISMİ AKIŞ';
+                healthClass = 'degraded';
+            } else {
+                healthText = 'VERİ BEKLENİYOR';
+                healthClass = 'waiting';
+            }
+            health.textContent = healthText;
+            health.className = `stream-health ${healthClass}`;
+
+            document.getElementById('command-trade-rate').textContent = `${telemetry.tradeRate.toFixed(1)}/sn`;
+            document.getElementById('command-trade-age').textContent = `Son: ${this.ageLabel(telemetry.lastTradeAt)}`;
+            document.getElementById('command-market-sync').textContent = `${telemetry.klineCount} / ${telemetry.depthCount}`;
+            document.getElementById('command-market-age').textContent = `M ${this.ageLabel(telemetry.lastKlineAt)} · D ${this.ageLabel(telemetry.lastDepthAt)}`;
+            document.getElementById('command-strategy-state').textContent = `${Object.keys(this.activeStrategies).length} / ${Object.keys(this.strategies).length}`;
+            document.getElementById('command-proposal-count').textContent = telemetry.strategyErrors
+                ? `${telemetry.proposalCount} teklif · ${telemetry.strategyErrors} hata`
+                : `${telemetry.proposalCount} teklif · ${telemetry.analysisCycles} tur`;
+            document.getElementById('command-decision').textContent = telemetry.lastDecision;
+            document.getElementById('command-event-sequence').textContent = `Olay #${telemetry.eventSequence} · ${telemetry.confluenceCount} karar`;
         }
 
         handleStrategyProposal(strategy, direction, reason, baseScore) {
@@ -993,6 +1231,13 @@
             startButton.textContent = 'Başlatılıyor…';
             document.getElementById('stop-btn').disabled = false;
             this.updateConnection(false, 'BAĞLANIYOR');
+            this.resetCommandTelemetry();
+            this.startCommandCenterClock();
+            this.eventBus.emit('system.started', {
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                timestamp: Date.now()
+            });
             this.notify('Sistem başlatılıyor; öğrenme durumu ve piyasa verisi yükleniyor.', 'success');
 
             await this.learningReady;
@@ -1019,13 +1264,23 @@
             window.clearInterval(this.renderTimer);
             window.clearInterval(this.analysisTimer);
             window.clearInterval(this.connectionWatchTimer);
+            window.clearInterval(this.commandCenterTimer);
             if (this.priceRenderFrame !== null) window.cancelAnimationFrame(this.priceRenderFrame);
+            if (this.commandRenderFrame !== null) window.cancelAnimationFrame(this.commandRenderFrame);
             this.renderTimer = null;
             this.analysisTimer = null;
             this.connectionWatchTimer = null;
+            this.commandCenterTimer = null;
             this.priceRenderFrame = null;
+            this.commandRenderFrame = null;
             this.disconnectWebSocket();
             this.updateConnection(false, 'DURDURULDU');
+            this.eventBus.emit('system.stopped', {
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                timestamp: Date.now()
+            });
+            this.renderCommandCenter();
             if (!options.silent) this.notify('Sistem durduruldu.', 'warning');
         }
 
@@ -1040,6 +1295,11 @@
             this.saveData(STORAGE.timeframe, timeframe);
             this.resetMarketData();
             this.syncControls();
+            this.eventBus.emit('market.changed', {
+                symbol,
+                timeframe,
+                timestamp: Date.now()
+            });
             this.notify(`${symbol.replace('USDT', '/USDT')} · ${timeframe} seçildi.`, 'info');
             if (shouldRestart) await this.start();
         }
@@ -1052,6 +1312,7 @@
             this.lastMarketMessageAt = 0;
             this.lastTradeAt = 0;
             this.lastTradePrice = null;
+            this.lastClosedCandleEventTime = 0;
             this.indicators = { rsi: [], atr: null, sma20: null, sma50: null, vwap: null };
             this.chartManager.setData([]);
             this.chartManager.setSignalMarkers([]);
@@ -1100,11 +1361,17 @@
                     if (this.lastTradeAt > requestStartedAt && finite(this.lastTradePrice)) {
                         this.mergeTradeIntoCandle(this.lastTradePrice, this.lastTradeAt, 0, false);
                     }
-                    this.calculateIndicators();
+                    this.calculateIndicators('initial-history');
                     this.chartManager.setData(this.candles);
                     this.chartManager.setSignalMarkers(this.signals.filter(signal => signal.symbol === this.currentSymbol));
                     document.getElementById('chart-empty').classList.toggle('hidden', this.candles.length > 0);
                     loadedHistory = true;
+                    this.eventBus.emit('market.history.loaded', {
+                        symbol: this.currentSymbol,
+                        timeframe: this.currentTimeframe,
+                        candles: this.candles.length,
+                        timestamp: Date.now()
+                    });
                 } catch (error) {
                     console.warn('Geçmiş mum verisi okunamadı:', error);
                 }
@@ -1126,6 +1393,13 @@
                 if (this.lastTradeAt <= requestStartedAt && finite(tickerData.c)) {
                     this.setLivePrice(Number(tickerData.c), Date.now(), 'rest', { updateCandle: false });
                 }
+                this.eventBus.emit('market.ticker', {
+                    symbol: this.currentSymbol,
+                    change24h: this.marketData.change24h,
+                    volume24h: this.marketData.volume24h,
+                    source: 'rest',
+                    timestamp: Date.now()
+                });
             }
 
             const latestCandle = this.candles.at(-1);
@@ -1142,6 +1416,11 @@
                     ? candlesResult.reason?.message
                     : `Binance HTTP ${candlesResult.value?.status || 'hatası'}`;
                 console.warn('Geçmiş veri alınamadı:', reason);
+                this.eventBus.emit('feed.error', {
+                    channel: 'history',
+                    reason,
+                    timestamp: Date.now()
+                });
                 this.notify('Geçmiş mumlar yüklenemedi; canlı trade akışıyla devam ediliyor.', 'warning');
             }
         }
@@ -1173,6 +1452,7 @@
                 this.marketSocketOpenedAt = Date.now();
                 document.getElementById('start-btn').textContent = 'Çalışıyor';
                 this.updateConnection(false, 'AKIŞ BEKLENİYOR');
+                this.eventBus.emit('feed.connected', { channel: 'market', timestamp: Date.now() });
             });
             socket.addEventListener('message', event => {
                 if (socket !== this.socket) return;
@@ -1186,10 +1466,13 @@
                 }
             });
             socket.addEventListener('error', () => {
-                if (socket === this.socket) this.updateConnection(false, 'BAĞLANTI HATASI');
+                if (socket !== this.socket) return;
+                this.updateConnection(false, 'BAĞLANTI HATASI');
+                this.eventBus.emit('feed.error', { channel: 'market', timestamp: Date.now() });
             });
             socket.addEventListener('close', () => {
                 if (socket !== this.socket || !this.isRunning) return;
+                this.eventBus.emit('feed.disconnected', { channel: 'market', timestamp: Date.now() });
                 this.socket = null;
                 this.closeDepthSocket();
                 this.reconnectAttempts += 1;
@@ -1214,7 +1497,9 @@
             this.depthSocket = socket;
 
             socket.addEventListener('open', () => {
-                if (socket === this.depthSocket) this.depthReconnectAttempts = 0;
+                if (socket !== this.depthSocket) return;
+                this.depthReconnectAttempts = 0;
+                this.eventBus.emit('feed.connected', { channel: 'depth', timestamp: Date.now() });
             });
             socket.addEventListener('message', event => {
                 if (socket !== this.depthSocket) return;
@@ -1225,8 +1510,14 @@
                     console.error('Depth WebSocket verisi işlenemedi:', error);
                 }
             });
+            socket.addEventListener('error', () => {
+                if (socket === this.depthSocket) {
+                    this.eventBus.emit('feed.error', { channel: 'depth', timestamp: Date.now() });
+                }
+            });
             socket.addEventListener('close', () => {
                 if (socket !== this.depthSocket || !this.isRunning || !this.socket) return;
+                this.eventBus.emit('feed.disconnected', { channel: 'depth', timestamp: Date.now() });
                 this.depthSocket = null;
                 this.depthReconnectAttempts += 1;
                 const delay = Math.min(30000, 3000 * 2 ** Math.min(this.depthReconnectAttempts - 1, 4));
@@ -1279,9 +1570,14 @@
                     // sessiz kalırsa düşük hacimli pariteler için son fiyat yedeği olur.
                     if (Date.now() - this.lastTradeAt > 3000 && finite(data.c)) {
                         this.setLivePrice(Number(data.c), Number(data.E) || Date.now(), 'ticker');
-                    } else {
-                        this.queuePriceRender();
                     }
+                    this.eventBus.emit('market.ticker', {
+                        symbol: this.currentSymbol,
+                        change24h: this.marketData.change24h,
+                        volume24h: this.marketData.volume24h,
+                        source: 'websocket',
+                        timestamp: Number(data.E) || Date.now()
+                    });
                 }
                 return;
             }
@@ -1291,9 +1587,16 @@
                     bids: (data.b || []).map(([price, qty]) => [Number(price), Number(qty)]),
                     asks: (data.a || []).map(([price, qty]) => [Number(price), Number(qty)])
                 };
-                this.heatmapManager.draw(this.orderBook, this.marketData.price);
-                document.getElementById('heatmap-empty').classList.toggle('hidden', this.orderBook.bids.length > 0);
-                Object.values(this.strategies).forEach(strategy => strategy.analyzeOrderBook(this.orderBook));
+                const timestamp = Number(data.E) || Date.now();
+                this.commandTelemetry.depthCount += 1;
+                this.commandTelemetry.lastDepthAt = Date.now();
+                this.eventBus.emit('market.orderbook', {
+                    symbol: this.currentSymbol,
+                    orderBook: this.orderBook,
+                    bestBid: this.orderBook.bids[0]?.[0] || null,
+                    bestAsk: this.orderBook.asks[0]?.[0] || null,
+                    timestamp
+                });
                 return;
             }
 
@@ -1310,15 +1613,22 @@
                     volume: Number(kline.v),
                     closed: Boolean(kline.x)
                 };
+                const timestamp = Number(data.E) || Date.now();
+                this.commandTelemetry.klineCount += 1;
+                this.commandTelemetry.lastKlineAt = Date.now();
                 this.upsertCandle(candle);
-                this.chartManager.dataLength = this.candles.length;
-                this.chartManager.updateRealtime(candle);
-                document.getElementById('chart-empty').classList.add('hidden');
                 if (Date.now() - this.lastTradeAt > 1500) {
-                    this.setLivePrice(candle.close, Number(data.E) || Date.now(), 'kline', { updateCandle: false });
+                    this.setLivePrice(candle.close, timestamp, 'kline', { updateCandle: false });
                 }
-                if (candle.closed) this.calculateIndicators();
-                this.checkAutoCloseSignals();
+                if (candle.closed) this.calculateIndicators('candle-close');
+                this.eventBus.emit('market.candle.updated', {
+                    symbol: this.currentSymbol,
+                    timeframe: this.currentTimeframe,
+                    candle: { ...candle },
+                    source: 'kline',
+                    timestamp
+                });
+                if (candle.closed) this.publishClosedCandle(candle, 'kline', timestamp);
                 return;
             }
 
@@ -1332,8 +1642,21 @@
                 if (!finite(trade.price)) return;
                 if (data.s === 'BTCUSDT') this.marketData.btcPrice = trade.price;
                 if (data.s !== this.currentSymbol) return;
+                const receivedAt = Date.now();
+                this.commandTelemetry.tradeCount += 1;
+                this.commandTelemetry.tradesInWindow += 1;
+                this.commandTelemetry.recentTradeTimes.push(receivedAt);
+                const oldestRecentTrade = this.commandTelemetry.recentTradeTimes[0] || receivedAt;
+                const liveWindowSeconds = Math.min(5, Math.max((receivedAt - oldestRecentTrade) / 1000, 1));
+                this.commandTelemetry.tradeRate = this.commandTelemetry.recentTradeTimes.length / liveWindowSeconds;
+                this.commandTelemetry.lastTradeAt = receivedAt;
                 this.setLivePrice(trade.price, trade.timestamp, 'aggTrade', { quantity: trade.quantity });
-                Object.values(this.strategies).forEach(strategy => strategy.processTrade(trade));
+                this.eventBus.emit('market.trade', {
+                    symbol: this.currentSymbol,
+                    timeframe: this.currentTimeframe,
+                    trade,
+                    timestamp: trade.timestamp
+                });
             }
         }
 
@@ -1341,6 +1664,7 @@
             if (!finite(price)) return;
             const numericPrice = Number(price);
             const eventTime = finite(timestamp) ? Number(timestamp) : Date.now();
+            const previousPrice = finite(this.marketData.price) ? Number(this.marketData.price) : null;
             this.marketData.price = numericPrice;
             if (this.currentSymbol === 'BTCUSDT') this.marketData.btcPrice = numericPrice;
 
@@ -1352,9 +1676,28 @@
                 this.mergeTradeIntoCandle(numericPrice, eventTime, Number(options.quantity) || 0, true);
             }
 
-            this.adaptiveLearning.onPrice(this.currentSymbol, numericPrice);
-            this.checkAutoCloseSignals();
-            this.queuePriceRender();
+            this.eventBus.emit('market.price', {
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                price: numericPrice,
+                previousPrice,
+                source,
+                timestamp: eventTime
+            });
+        }
+
+        publishClosedCandle(candle, trigger = 'stream', timestamp = Date.now()) {
+            if (!candle || !finite(candle.time) || Number(candle.time) <= this.lastClosedCandleEventTime) return false;
+            this.lastClosedCandleEventTime = Number(candle.time);
+            this.commandTelemetry.closedCandleCount += 1;
+            this.eventBus.emit('market.candle.closed', {
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                candle: { ...candle, closed: true },
+                trigger,
+                timestamp
+            });
+            return true;
         }
 
         mergeTradeIntoCandle(price, timestamp, quantity = 0, updateChart = true) {
@@ -1394,19 +1737,30 @@
             }
 
             this.upsertCandle(candle);
-            this.chartManager.dataLength = this.candles.length;
-            if (updateChart) this.chartManager.updateRealtime(candle);
-            document.getElementById('chart-empty').classList.add('hidden');
-            if (closedPrevious) this.calculateIndicators();
+            if (updateChart) {
+                this.eventBus.emit('market.candle.updated', {
+                    symbol: this.currentSymbol,
+                    timeframe: this.currentTimeframe,
+                    candle: { ...candle },
+                    source: 'price',
+                    timestamp
+                });
+            }
+            if (closedPrevious) {
+                this.calculateIndicators('trade-rollover');
+                this.publishClosedCandle(last, 'trade-rollover', timestamp);
+            }
             return candle;
         }
 
         queuePriceRender() {
             if (this.priceRenderFrame !== null) return;
-            this.priceRenderFrame = window.requestAnimationFrame(() => {
+            this.priceRenderFrame = -1;
+            const frame = window.requestAnimationFrame(() => {
                 this.priceRenderFrame = null;
                 this.renderPrice();
             });
+            if (this.priceRenderFrame !== null) this.priceRenderFrame = frame;
         }
 
         upsertCandle(candle) {
@@ -1422,12 +1776,20 @@
 
         runPeriodicAnalysis() {
             if (!this.isRunning) return;
-            this.calculateIndicators();
-            this.eventBus.emit('market.regime.check');
-            Object.values(this.strategies).forEach(strategy => strategy.periodicAnalyze());
+            this.calculateIndicators('periodic');
+            this.eventBus.emit('market.regime.check', {
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                trigger: 'periodic'
+            });
+            this.eventBus.emit('analysis.tick', {
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                trigger: 'periodic'
+            });
         }
 
-        calculateIndicators() {
+        calculateIndicators(trigger = 'manual') {
             const candles = this.getClosedCandles();
             const closes = candles.map(candle => candle.close);
             const rsiPeriod = clamp(Number(this.settings.params.rsiPeriod) || 14, 2, 100);
@@ -1462,6 +1824,21 @@
                 totalVolume += candle.volume;
             });
             this.indicators.vwap = totalVolume ? priceVolume / totalVolume : null;
+            this.commandTelemetry.indicatorUpdates += 1;
+            this.eventBus.emit('market.indicators.updated', {
+                symbol: this.currentSymbol,
+                timeframe: this.currentTimeframe,
+                indicators: {
+                    atr: this.indicators.atr,
+                    sma20: this.indicators.sma20,
+                    sma50: this.indicators.sma50,
+                    vwap: this.indicators.vwap,
+                    rsi: this.indicators.rsi.at(-1)
+                },
+                closedCandles: candles.length,
+                trigger,
+                timestamp: Date.now()
+            });
         }
 
         calculateRsi(closes, period) {
@@ -1898,7 +2275,8 @@
             this.saveData(STORAGE.settings, this.settings);
             this.confluenceEngine.reset();
             this.updateActiveStrategies();
-            this.calculateIndicators();
+            this.calculateIndicators('settings-changed');
+            this.eventBus.emit('settings.changed', { settings: this.settings, timestamp: Date.now() });
             this.renderSafetyChips();
             this.renderLearning();
             this.notify('Ayarlar kaydedildi; bekleyen teklifler temizlendi.', 'success');
@@ -2090,7 +2468,7 @@
         try {
             window.app = new TradingScannerApp();
             if ('serviceWorker' in navigator && window.isSecureContext) {
-                navigator.serviceWorker.register('./sw.js?v=6').catch(error => {
+                navigator.serviceWorker.register('./sw.js?v=7').catch(error => {
                     console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
                 });
             }

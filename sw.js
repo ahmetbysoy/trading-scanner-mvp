@@ -1,11 +1,11 @@
-const CACHE_NAME = 'utc-scanner-shell-v10';
+const CACHE_NAME = 'utc-scanner-shell-v11';
 const APP_SHELL = [
     './',
     './index.html',
-    './styles.css?v=10',
-    './src/adaptive-learning.js?v=10',
-    './src/confluence-engine.js?v=10',
-    './src/app.js?v=10',
+    './styles.css?v=11',
+    './src/adaptive-learning.js?v=11',
+    './src/confluence-engine.js?v=11',
+    './src/app.js?v=11',
     './manifest.webmanifest?v=1',
     './icon.svg'
 ];

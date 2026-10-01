@@ -23,6 +23,18 @@ Mobil Piyasa görünümü enstrüman fiyatına göre eksen hassasiyetini otomati
 
 Canlı veri, Binance USDⓈ-M Futures'ın güncel yönlendirilmiş WebSocket adreslerini kullanır: fiyat ve işlem akışı `/market` üzerindeki `@aggTrade` (100 ms), mumlar `@kline`, 24 saatlik istatistikler `@ticker`, derinlik ise ayrı `/public` bağlantısındaki `@depth20@100ms` kaynağından gelir. REST geçmiş verisi gecikse veya erişilemese bile trade akışı fiyatı ve canlı mumu başlatır; sekiz saniye veri gelmeyen bağlantı otomatik yenilenir.
 
+### Canlı komuta omurgası
+
+Bütün çalışma zamanı bileşenleri sıralı, geçmişi sınırlı bir olay omurgası üzerinden haberleşir:
+
+1. `market.trade`, `market.price`, `market.orderbook` ve `market.candle.*` olayları veri katmanından yayınlanır.
+2. Mikro-yapı stratejileri her trade/depth olayını; mum stratejileri her kapanış ve periyodik analiz turunu aynı omurgadan alır.
+3. Her strateji teklifi `proposal.created` ile shadow öğrenmeye, aktif stratejiler için `confluence.proposal.received` ile karar motoruna gider.
+4. Confluence sonucu `confluence.evaluated`; sinyal yaşam döngüsü `signal.generated`, `signal.blocked` ve `signal.closed` olarak yayınlanır.
+5. Adaptif motor sonuçları, rejimi, ağırlıkları ve cooldown'ları günceller; Canlı Komuta Akışı paneli trade hızı, mum/depth senkronu, strateji teklifleri ve son kararı görünür kılar.
+
+Bir stratejide çalışma zamanı hatası oluşursa `strategy.error` olayı yayınlanır; diğer stratejilerin veri alması kesilmez ve panel sistemi bozulmuş gibi `STRATEJİ HATASI` durumuna geçirir.
+
 Kono kaynak incelemesindeki “kullan / uyarla / reddet” kararları için [`docs/kono-mobile-analysis.md`](docs/kono-mobile-analysis.md) belgesine bakın.
 
 ## Adaptif hibrit öğrenme
@@ -192,3 +204,4 @@ Testler şu senaryoları kapsar:
 - Mobil alt navigasyon, görünüm kalıcılığı, tam ekran dialoglar, sinyal rozeti ve dokunma hedefleri gerçek mobil viewport'ta çalışır.
 - Gerçek Lightweight Charts paketiyle BTC ekseninin iki ondalık basamak kullandığı, okunabilir mobil mum aralığının odaklandığı ve araçların fiyat ekseniyle çakışmadığı doğrulanır.
 - Güncel `/market` ve `/public` Binance Futures WebSocket adresleri, ardışık `@aggTrade` fiyatları ve REST tamamen kesikken canlı mum oluşturma davranışı tarayıcı seviyesinde doğrulanır.
+- Trade → fiyat/mum → strateji → adaptif öğrenme → confluence → komuta paneli zinciri gerçek Chromium DOM'u ve sıralı olay geçmişi üzerinde doğrulanır.

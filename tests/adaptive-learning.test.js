@@ -5,6 +5,36 @@ const {
     AdaptiveLearningEngine
 } = require('../src/adaptive-learning.js');
 
+test('olay omurgası sıralı zarf, wildcard dinleyici ve sınırlı geçmiş sağlar', () => {
+    const bus = new EventBus({ historyLimit: 2 });
+    const named = [];
+    const all = [];
+    bus.on('market.trade', payload => named.push(payload.price));
+    bus.onAny(envelope => all.push(`${envelope.id}:${envelope.event}`));
+
+    bus.emit('market.trade', { price: 100 });
+    bus.emit('market.orderbook', { spread: 0.1 });
+    bus.emit('market.trade', { price: 101 });
+
+    assert.deepEqual(named, [100, 101]);
+    assert.deepEqual(all, ['1:market.trade', '2:market.orderbook', '3:market.trade']);
+    assert.equal(bus.recent().length, 2);
+    assert.equal(bus.recent('market.trade', 5).length, 1);
+    assert.equal(bus.recent().at(-1).payload.price, 101);
+});
+
+test('iç içe yayınlanan olaylar bütün dinleyicilere sıra numarasıyla teslim edilir', () => {
+    const bus = new EventBus({ historyLimit: 10 });
+    const deliveries = [];
+    bus.on('market.trade', () => bus.emit('proposal.created', { strategy: 'velocity' }));
+    bus.onAny(envelope => deliveries.push(`${envelope.id}:${envelope.event}`));
+
+    bus.emit('market.trade', { price: 100 });
+
+    assert.deepEqual(deliveries, ['1:market.trade', '2:proposal.created']);
+    assert.deepEqual(bus.recent().map(envelope => envelope.id), [1, 2]);
+});
+
 class MemoryStore {
     constructor(saved = null) { this.value = saved; }
     async init() { return true; }

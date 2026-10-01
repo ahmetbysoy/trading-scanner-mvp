@@ -227,6 +227,52 @@ input:hover, select:hover, .symbol-field:hover { border-color: var(--border-stro
 .metric span { color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .metric strong { overflow: hidden; text-overflow: ellipsis; font-size: clamp(13px, 1.35vw, 18px); }
 
+.command-stream {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--panel-3) 86%, transparent);
+}
+.command-stream-heading {
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.command-stream-heading > div { display: flex; align-items: baseline; gap: 9px; }
+.command-stream-heading strong { font-size: 11px; }
+.stream-health {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .08em;
+}
+.stream-health.live { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 42%, var(--border)); }
+.stream-health.degraded { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); }
+.command-stream-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.command-stream-grid article {
+    min-width: 0;
+    padding: 8px 10px;
+    display: grid;
+    gap: 2px;
+    border-left: 2px solid var(--border-strong);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+.command-stream-grid span, .command-stream-grid small {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 8px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.command-stream-grid strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
 .workspace {
     margin-top: 14px;
     min-height: 600px;
@@ -511,6 +557,12 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .metric { min-height: 76px; padding: 12px; border-radius: 14px; }
     .metric span { font-size: 8px; }
     .metric strong { font-size: 15px; }
+    .command-stream { margin-top: 9px; padding: 10px; border-radius: 14px; }
+    .command-stream-heading > div { display: grid; gap: 2px; }
+    .command-stream-heading strong { font-size: 10px; }
+    .command-stream-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .command-stream-grid article { min-height: 55px; padding: 8px; }
+    .command-stream-grid strong { font-size: 10px; }
     .safety-panel {
         margin-top: 10px;
         padding: 14px;

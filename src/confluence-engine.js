@@ -71,6 +71,16 @@
             });
 
             this._pruneExpired(now);
+            if (this.bot.eventBus && typeof this.bot.eventBus.emit === 'function') {
+                this.bot.eventBus.emit('confluence.proposal.received', {
+                    symbol,
+                    strategy,
+                    direction,
+                    score: numericScore,
+                    evidenceFamily: metadata.evidenceFamily || 'other',
+                    timestamp: now
+                });
+            }
             this._scheduleEvaluation();
             return true;
         }
@@ -82,8 +92,23 @@
             const delay = delayOverride === null ? configuredDelay : Math.max(0, Number(delayOverride) || 0);
             this._evaluationTimer = this._setTimeout(() => {
                 this._evaluationTimer = null;
-                this.checkConfluence();
+                this._evaluateAndPublish('scheduled');
             }, delay);
+        }
+
+        _evaluateAndPublish(trigger = 'manual') {
+            const result = this.checkConfluence();
+            if (this.bot.eventBus && typeof this.bot.eventBus.emit === 'function') {
+                this.bot.eventBus.emit('confluence.evaluated', {
+                    ...result,
+                    symbol: this.bot.currentSymbol,
+                    timeframe: this.bot.currentTimeframe || null,
+                    proposalCount: this.proposals.filter(proposal => proposal.symbol === this.bot.currentSymbol).length,
+                    trigger,
+                    timestamp: this._now()
+                });
+            }
+            return result;
         }
 
         /**
@@ -95,7 +120,7 @@
                 this._clearTimeout(this._evaluationTimer);
                 this._evaluationTimer = null;
             }
-            return this.checkConfluence();
+            return this._evaluateAndPublish('manual');
         }
 
         checkConfluence() {

@@ -12,6 +12,7 @@ function createHarness(overrides = {}) {
         currentSymbol: 'BTCUSDT',
         marketData: { price: 60_000 },
         signals: [],
+        eventBus: overrides.eventBus || null,
         strategies: {
             momentum: { displayName: 'Momentum' },
             orderFlow: { displayName: 'Order Flow' },
@@ -93,6 +94,26 @@ test('ilk teklif hemen sinyal olmaz; değerlendirme penceresi karşıt oyları b
 
     assert.equal(result.status, 'conflict');
     assert.equal(h.bot.signals.length, 0);
+});
+
+test('teklif kabulü ve zamanlanmış değerlendirme olay veri yoluna yayınlanır', () => {
+    const events = [];
+    const h = createHarness({
+        eventBus: {
+            emit(event, payload) {
+                events.push({ event, payload });
+            }
+        }
+    });
+
+    h.engine.propose('momentum', 'buy', 'olay zinciri', 2);
+    assert.equal(events[0].event, 'confluence.proposal.received');
+    assert.equal(events[0].payload.strategy, 'momentum');
+
+    h.runTimer();
+    assert.equal(events[1].event, 'confluence.evaluated');
+    assert.equal(events[1].payload.trigger, 'scheduled');
+    assert.equal(events[1].payload.status, 'below-threshold');
 });
 
 test('tek stratejiden gelen skor 5, bağımsız teyit olmadan sinyal sayılmaz', () => {
