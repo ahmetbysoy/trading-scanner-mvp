@@ -172,14 +172,19 @@ test.describe('masaüstü uygulama akışı', () => {
         await page.locator('#settings-btn').click();
         await expect(page.locator('#settings-dialog')).toBeVisible();
         await page.locator('#setting-threshold').fill('4');
+        await page.locator('#setting-quality-spread').fill('12');
         await page.locator('#save-settings-btn').click();
         await expect(page.locator('#settings-dialog')).toBeHidden();
-        await expect.poll(() => page.evaluate(() => window.app.settings.confluenceThreshold)).toBe(4);
+        await expect.poll(() => page.evaluate(() => ({
+            threshold: window.app.settings.confluenceThreshold,
+            spreadBps: window.app.settings.marketQuality.maxSpreadBps
+        }))).toEqual({ threshold: 4, spreadBps: 12 });
 
         await page.locator('#settings-btn').click();
         page.once('dialog', dialog => dialog.accept());
         await page.locator('#reset-settings-btn').click();
         await expect(page.locator('#setting-threshold')).toHaveValue('3');
+        await expect(page.locator('#setting-quality-spread')).toHaveValue('8');
         await expect.poll(() => page.evaluate(() => window.app.settings.confluenceThreshold)).toBe(3);
         await page.locator('#close-settings-btn').click();
 
@@ -255,6 +260,8 @@ test.describe('masaüstü uygulama akışı', () => {
             depth: window.app.commandTelemetry.depthCount
         }))).toEqual({ trades: 2, klines: 1, depth: 1 });
         await expect(page.locator('#command-health')).toHaveText('TÜM SİSTEM CANLI');
+        await expect(page.locator('#command-market-quality')).toHaveText('SAĞLIKLI');
+        await expect(page.locator('#command-market-quality-detail')).toContainText('Spread');
         await expect(page.locator('#command-market-sync')).toHaveText('1 / 1');
         await expect.poll(() => page.evaluate(() => window.app.eventBus.recent('market.trade', 10).length)).toBe(2);
         await page.screenshot({ path: 'test-results/audit-command-center-live.png', fullPage: true });
@@ -283,7 +290,14 @@ test.describe('masaüstü uygulama akışı', () => {
             velocity.threshold = 0.0001;
             window.app.strategies.wallBounce.processTrade = () => { throw new Error('izole test hatası'); };
             const marketSocket = window.__fakeSockets.find(socket => socket.url.includes('/market/'));
+            const depthSocket = window.__fakeSockets.find(socket => socket.url.includes('/public/'));
             const now = Date.now();
+            depthSocket.dispatch('message', {
+                data: JSON.stringify({
+                    stream: 'btcusdt@depth20@100ms',
+                    data: { E: now, b: [['64995', '10']], a: [['65005', '10']] }
+                })
+            });
             [65000, 65020, 65045].forEach((price, index) => {
                 marketSocket.dispatch('message', {
                     data: JSON.stringify({
@@ -313,6 +327,65 @@ test.describe('masaüstü uygulama akışı', () => {
         await expect(page.locator('#command-decision')).toHaveText('EŞİK ALTI');
         await expect(page.locator('#command-health')).toHaveText('STRATEJİ HATASI');
         await expect(page.locator('#command-proposal-count')).toContainText('3 hata');
+    });
+
+    test('piyasa kalite geçidi kritik spread durumunda yeni sinyali bloklar ve sağlıklı depth ile toparlanır', async ({ page }) => {
+        await page.locator('#start-btn').click();
+        await expect.poll(() => page.evaluate(() => window.__fakeSockets?.length || 0)).toBeGreaterThanOrEqual(2);
+
+        const blocked = await page.evaluate(() => {
+            const marketSocket = window.__fakeSockets.find(socket => socket.url.includes('/market/'));
+            const depthSocket = window.__fakeSockets.find(socket => socket.url.includes('/public/'));
+            const now = Date.now();
+            depthSocket.dispatch('message', {
+                data: JSON.stringify({
+                    stream: 'btcusdt@depth20@100ms',
+                    data: { E: now, b: [['65000', '10']], a: [['65200', '10']] }
+                })
+            });
+            marketSocket.dispatch('message', {
+                data: JSON.stringify({
+                    stream: 'btcusdt@aggTrade',
+                    data: { e: 'aggTrade', E: now + 1, T: now + 1, s: 'BTCUSDT', p: '65100', q: '0.1', m: false }
+                })
+            });
+            window.app.confluenceEngine.propose('velocityScalping', 'buy', 'kalite testi', 5, {
+                evidenceFamily: 'momentum', family: 'micro'
+            });
+            window.app.confluenceEngine.propose('orderFlowMomentum', 'buy', 'kalite testi', 5, {
+                evidenceFamily: 'microstructure', family: 'micro'
+            });
+            return window.app.confluenceEngine.evaluateNow();
+        });
+
+        expect(blocked.status).toBe('blocked');
+        expect(blocked.reason).toBe('market-quality-critical-spread');
+        await expect(page.locator('#command-market-quality')).toHaveText('GEÇERSİZ');
+        await expect(page.locator('#command-health')).toHaveText('PİYASA KİLİDİ');
+        await expect(page.locator('#command-decision')).toHaveText('ENGEL: PİYASA KALİTESİ');
+        await expect.poll(() => page.evaluate(() =>
+            window.app.eventBus.recent('signal.blocked', 10)
+                .some(envelope => envelope.payload.reason === 'market-quality-critical-spread')
+        )).toBe(true);
+
+        await page.evaluate(() => {
+            const marketSocket = window.app.socket;
+            const depthSocket = window.app.depthSocket;
+            const now = Date.now();
+            depthSocket.dispatch('message', {
+                data: JSON.stringify({
+                    stream: 'btcusdt@depth20@100ms',
+                    data: { E: now, b: [['65099', '10']], a: [['65101', '10']] }
+                })
+            });
+            marketSocket.dispatch('message', {
+                data: JSON.stringify({
+                    stream: 'btcusdt@aggTrade',
+                    data: { e: 'aggTrade', E: now + 1, T: now + 1, s: 'BTCUSDT', p: '65100', q: '0.1', m: false }
+                })
+            });
+        });
+        await expect(page.locator('#command-market-quality')).toHaveText('SAĞLIKLI');
     });
 
     test('REST erişilemezken routed trade akışı fiyatı ve canlı mumu başlatır', async ({ page }) => {
@@ -510,6 +583,12 @@ test.describe('mobil uygulama akışı', () => {
         await expect(page.locator('[data-settings-target="settings-safety"]')).toHaveClass(/active/);
         await expect(page.locator('#settings-safety')).toBeInViewport();
         await page.screenshot({ path: 'test-results/audit-10-settings-middle.png' });
+        await page.locator('[data-settings-target="settings-quality"]').click();
+        await expect(page.locator('[data-settings-target="settings-quality"]')).toHaveClass(/active/);
+        await expect(page.locator('#settings-quality')).toBeInViewport();
+        await expect(page.locator('#setting-quality-spread')).toHaveValue('8');
+        await expect(page.locator('#setting-quality-depth-usd')).toHaveValue('50000');
+        await page.screenshot({ path: 'test-results/audit-10b-settings-quality.png' });
         await page.locator('[data-settings-target="settings-strategies"]').click();
         await expect(page.locator('[data-settings-target="settings-strategies"]')).toHaveClass(/active/);
         await expect(page.locator('#settings-strategies')).toBeInViewport();

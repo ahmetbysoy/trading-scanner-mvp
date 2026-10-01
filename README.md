@@ -31,7 +31,9 @@ Bütün çalışma zamanı bileşenleri sıralı, geçmişi sınırlı bir olay 
 2. Mikro-yapı stratejileri her trade/depth olayını; mum stratejileri her kapanış ve periyodik analiz turunu aynı omurgadan alır.
 3. Her strateji teklifi `proposal.created` ile shadow öğrenmeye, aktif stratejiler için `confluence.proposal.received` ile karar motoruna gider.
 4. Confluence sonucu `confluence.evaluated`; sinyal yaşam döngüsü `signal.generated`, `signal.blocked` ve `signal.closed` olarak yayınlanır.
-5. Adaptif motor sonuçları, rejimi, ağırlıkları ve cooldown'ları günceller; Canlı Komuta Akışı paneli trade hızı, mum/depth senkronu, strateji teklifleri ve son kararı görünür kılar.
+5. Adaptif motor sonuçları, rejimi, ağırlıkları ve cooldown'ları günceller; Canlı Komuta Akışı paneli trade hızı, mum/depth senkronu, piyasa kalitesi, strateji teklifleri ve son kararı görünür kılar.
+
+`MarketQualityEngine`, trade/depth yaşı ile exchange→istemci transport gecikmesini ayrı ölçer; crossed/geçersiz book, kritik spread, kritik taraf derinliği ve kısa dönem fiyat şokunda yeni sinyali hard-block eder. Uyarı bandındaki spread veya derinlik nihai confluence eşiğini en fazla iki puan artırır. Bütün kararlar `market.quality.updated`, `market.quality.shock` ve gerekirse `signal.blocked` olaylarıyla audit zincirine girer. Eşikler Ayarlar → Piyasa bölümünden değiştirilebilir.
 
 Bir stratejide çalışma zamanı hatası oluşursa `strategy.error` olayı yayınlanır; diğer stratejilerin veri alması kesilmez ve panel sistemi bozulmuş gibi `STRATEJİ HATASI` durumuna geçirir.
 
@@ -205,3 +207,4 @@ Testler şu senaryoları kapsar:
 - Gerçek Lightweight Charts paketiyle BTC ekseninin iki ondalık basamak kullandığı, okunabilir mobil mum aralığının odaklandığı ve araçların fiyat ekseniyle çakışmadığı doğrulanır.
 - Güncel `/market` ve `/public` Binance Futures WebSocket adresleri, ardışık `@aggTrade` fiyatları ve REST tamamen kesikken canlı mum oluşturma davranışı tarayıcı seviyesinde doğrulanır.
 - Trade → fiyat/mum → strateji → adaptif öğrenme → confluence → komuta paneli zinciri gerçek Chromium DOM'u ve sıralı olay geçmişi üzerinde doğrulanır.
+- Taze ve sağlıklı Futures depth geçidi açarken bayat veri, transport gecikmesi, crossed book, kritik spread/derinlik ve kısa dönem fiyat şoku yeni sinyali bloklar; sağlıklı depth sonrası toparlanma hem unit hem Chromium akışında doğrulanır.

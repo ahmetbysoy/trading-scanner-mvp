@@ -141,7 +141,7 @@
             const sellBreakdown = this._scoreDirection(sellProposals, safety.maxFamilyContributionRatio);
             const buyScore = buyBreakdown.cappedScore;
             const sellScore = sellBreakdown.cappedScore;
-            const threshold = this._getThreshold();
+            const baseThreshold = this._getThreshold();
 
             if (Math.abs(buyScore - sellScore) < 1e-9) {
                 this._resetConviction(symbol);
@@ -156,10 +156,37 @@
             const candidateBreakdown = direction === 'buy' ? buyBreakdown : sellBreakdown;
             const opposingBreakdown = direction === 'buy' ? sellBreakdown : buyBreakdown;
             const scoreLead = candidateScore - opposingScore;
+            const marketQuality = this.bot.marketQualityEngine
+                && typeof this.bot.marketQualityEngine.getSnapshot === 'function'
+                ? this.bot.marketQualityEngine.getSnapshot(now)
+                : null;
 
+            if (marketQuality?.enabled && marketQuality.blockNewSignals) {
+                const primary = marketQuality.primaryReason || {
+                    code: 'unavailable',
+                    message: 'Piyasa kalitesi yeni sinyal için uygun değil.'
+                };
+                return this._block(
+                    symbol,
+                    direction,
+                    primary.message,
+                    now,
+                    `market-quality-${primary.code}`,
+                    { marketQuality }
+                );
+            }
+
+            const threshold = baseThreshold + Number(marketQuality?.thresholdPenalty || 0);
             if (candidateScore < threshold) {
                 this._resetConviction(symbol);
-                return { status: 'below-threshold', direction, score: candidateScore, threshold };
+                return {
+                    status: 'below-threshold',
+                    direction,
+                    score: candidateScore,
+                    threshold,
+                    baseThreshold,
+                    marketQuality
+                };
             }
 
             // BUY 5 / SELL 4 gibi çatışmalı bir tabloyu "güçlü 5" diye yayınlama.
@@ -310,6 +337,9 @@
                 candidateScore,
                 opposingScore,
                 scoreLead,
+                baseThreshold,
+                effectiveThreshold: threshold,
+                marketQuality,
                 isReversal,
                 independentFamilies,
                 familyScores: candidateBreakdown.familyScores,
@@ -649,16 +679,17 @@
                 }, null);
         }
 
-        _block(symbol, direction, message, now, reason) {
+        _block(symbol, direction, message, now, reason, metadata = {}) {
             // Engellenen teklifleri tüket. Aktif işlem kapanınca birkaç saniye önceki
             // bayat karşıt teklifin aniden sinyale dönüşmesini istemiyoruz.
             this.clearProposals(symbol);
             this._resetConviction(symbol);
+            const result = { status: 'blocked', direction, reason, message, ...metadata };
             if (this.bot.eventBus && typeof this.bot.eventBus.emit === 'function') {
-                this.bot.eventBus.emit('signal.blocked', { symbol, direction, reason, message, timestamp: now });
+                this.bot.eventBus.emit('signal.blocked', { symbol, ...result, timestamp: now });
             }
             this._logBlockedOnce(`${symbol}:${direction}:${reason}`, message, now);
-            return { status: 'blocked', direction, reason, message };
+            return result;
         }
 
         _logBlockedOnce(key, message, now) {

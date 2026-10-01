@@ -254,7 +254,7 @@ input:hover, select:hover, .symbol-field:hover { border-color: var(--border-stro
 }
 .stream-health.live { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 42%, var(--border)); }
 .stream-health.degraded { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); }
-.command-stream-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.command-stream-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
 .command-stream-grid article {
     min-width: 0;
     padding: 8px 10px;
@@ -272,6 +272,11 @@ input:hover, select:hover, .symbol-field:hover { border-color: var(--border-stro
     white-space: nowrap;
 }
 .command-stream-grid strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.quality-state.healthy { color: var(--positive); }
+.quality-state.degraded { color: var(--warning); }
+.quality-state.stale, .quality-state.shock, .quality-state.invalid { color: var(--negative); }
+.quality-state.waiting, .quality-state.disabled, .quality-state.stopped { color: var(--muted); }
+.quality-fieldset { border-color: color-mix(in srgb, var(--warning) 32%, var(--border)); }
 
 .workspace {
     margin-top: 14px;
@@ -562,6 +567,7 @@ legend { padding: 0 7px; color: var(--primary); font-size: 10px; font-weight: 70
     .command-stream-heading strong { font-size: 10px; }
     .command-stream-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
     .command-stream-grid article { min-height: 55px; padding: 8px; }
+    .command-stream-grid article:last-child:nth-child(odd) { grid-column: 1 / -1; }
     .command-stream-grid strong { font-size: 10px; }
     .safety-panel {
         margin-top: 10px;

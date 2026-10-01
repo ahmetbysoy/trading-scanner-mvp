@@ -793,8 +793,10 @@
             this.chartManager = new ChartManager('live-chart');
             this.heatmapManager = new HeatmapManager('orderbook-heatmap');
             if (!window.UTCAdaptive) throw new Error('Adaptif öğrenme modülü yüklenemedi.');
+            if (!window.UTCMarketQuality) throw new Error('Piyasa kalite modülü yüklenemedi.');
             this.eventBus = new window.UTCAdaptive.EventBus({ historyLimit: 400 });
             this.adaptiveLearning = new window.UTCAdaptive.AdaptiveLearningEngine(this, { eventBus: this.eventBus });
+            this.marketQualityEngine = new window.UTCMarketQuality.MarketQualityEngine(this, { eventBus: this.eventBus });
             this.confluenceEngine = new window.ConfluenceEngine(this);
             this.initStrategies();
             this.bindCommandCenterEvents();
@@ -847,6 +849,20 @@
                     shadowInfluence: 0.35,
                     maxShadowTrades: 120
                 },
+                marketQuality: {
+                    enabled: true,
+                    requireDepth: true,
+                    maxTradeAgeMs: 3000,
+                    maxDepthAgeMs: 2000,
+                    maxTransportLagMs: 2000,
+                    maxSpreadBps: 8,
+                    minDepthUsd: 50000,
+                    criticalSpreadMultiplier: 2,
+                    criticalDepthRatio: 0.5,
+                    shockMoveBps: 40,
+                    shockWindowMs: 3000,
+                    shockPauseMs: 120000
+                },
                 activeStrategies
             };
         }
@@ -862,6 +878,7 @@
                 cooldowns: { ...defaults.cooldowns, ...(saved.cooldowns || {}) },
                 signalSafety: { ...defaults.signalSafety, ...(saved.signalSafety || {}) },
                 learning: { ...defaults.learning, ...(saved.learning || {}) },
+                marketQuality: { ...defaults.marketQuality, ...(saved.marketQuality || {}) },
                 activeStrategies: { ...defaults.activeStrategies, ...(saved.activeStrategies || {}) }
             };
         }
@@ -938,7 +955,9 @@
             });
             this.eventBus.on('confluence.evaluated', result => {
                 this.commandTelemetry.confluenceCount += 1;
-                this.commandTelemetry.lastDecision = this.decisionLabel(result?.status);
+                this.commandTelemetry.lastDecision = result?.status === 'blocked' && result?.marketQuality
+                    ? 'ENGEL: PİYASA KALİTESİ'
+                    : this.decisionLabel(result?.status);
                 this.commandTelemetry.lastDecisionAt = Date.now();
             });
             this.eventBus.on('signal.generated', () => {
@@ -947,7 +966,9 @@
                 this.commandTelemetry.lastDecisionAt = Date.now();
             });
             this.eventBus.on('signal.blocked', payload => {
-                this.commandTelemetry.lastDecision = `ENGEL: ${this.decisionLabel(payload?.reason)}`;
+                this.commandTelemetry.lastDecision = payload?.marketQuality
+                    ? 'ENGEL: PİYASA KALİTESİ'
+                    : `ENGEL: ${this.decisionLabel(payload?.reason)}`;
                 this.commandTelemetry.lastDecisionAt = Date.now();
             });
             this.eventBus.on('strategy.error', payload => {
@@ -1013,6 +1034,7 @@
                 this.commandTelemetry.tradeRate = this.commandTelemetry.recentTradeTimes.length / windowSeconds;
                 this.commandTelemetry.tradesInWindow = 0;
                 this.commandTelemetry.lastRateSampleAt = now;
+                this.marketQualityEngine.tick(now);
                 this.renderCommandCenter();
             }, 1000);
         }
@@ -1036,6 +1058,7 @@
                 'awaiting-family-diversity': 'AİLE TEYİDİ',
                 'awaiting-conviction': 'KARAR OLUŞUYOR',
                 generated: 'SİNYAL ÜRETİLDİ',
+                blocked: 'ENGELLENDİ',
                 signal: 'SİNYAL',
                 'active-signal-lock': 'AKTİF KİLİT',
                 'signal-cooldown': 'COOLDOWN',
@@ -1051,19 +1074,55 @@
             return `${(ageMs / 1000).toFixed(ageMs < 10_000 ? 1 : 0)} sn`;
         }
 
+        marketQualityLabel(status) {
+            const labels = {
+                healthy: 'SAĞLIKLI',
+                degraded: 'TEMKİNLİ',
+                stale: 'BAYAT VERİ',
+                shock: 'ŞOK KİLİDİ',
+                invalid: 'GEÇERSİZ',
+                waiting: 'BEKLENİYOR',
+                disabled: 'KAPALI',
+                stopped: 'DURDURULDU'
+            };
+            return labels[status] || 'BEKLENİYOR';
+        }
+
+        compactUsd(value) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) return '—';
+            if (numeric >= 1e9) return `$${(numeric / 1e9).toFixed(1)}B`;
+            if (numeric >= 1e6) return `$${(numeric / 1e6).toFixed(1)}M`;
+            if (numeric >= 1e3) return `$${(numeric / 1e3).toFixed(0)}K`;
+            return `$${Math.round(numeric)}`;
+        }
+
         renderCommandCenter() {
             const health = document.getElementById('command-health');
             if (!health) return;
             const telemetry = this.commandTelemetry;
-            const tradeAge = telemetry.lastTradeAt ? Date.now() - telemetry.lastTradeAt : Infinity;
-            const marketAge = telemetry.lastKlineAt ? Date.now() - telemetry.lastKlineAt : Infinity;
-            const depthAge = telemetry.lastDepthAt ? Date.now() - telemetry.lastDepthAt : Infinity;
+            const now = Date.now();
+            const quality = this.marketQualityEngine.getSnapshot(now);
+            const tradeAge = telemetry.lastTradeAt ? now - telemetry.lastTradeAt : Infinity;
+            const marketAge = telemetry.lastKlineAt ? now - telemetry.lastKlineAt : Infinity;
+            const depthAge = telemetry.lastDepthAt ? now - telemetry.lastDepthAt : Infinity;
             let healthText = 'BEKLEMEDE';
             let healthClass = 'waiting';
             if (!this.isRunning) {
                 healthText = 'DURDURULDU';
             } else if (telemetry.strategyErrors > 0) {
                 healthText = 'STRATEJİ HATASI';
+                healthClass = 'degraded';
+            } else if (quality.enabled && quality.blockNewSignals) {
+                if (quality.status === 'waiting') {
+                    healthText = 'VERİ BEKLENİYOR';
+                    healthClass = 'waiting';
+                } else {
+                    healthText = quality.status === 'shock' ? 'ŞOK KİLİDİ' : 'PİYASA KİLİDİ';
+                    healthClass = 'degraded';
+                }
+            } else if (quality.status === 'degraded') {
+                healthText = 'KALİTE UYARISI';
                 healthClass = 'degraded';
             } else if (tradeAge < 3000 && marketAge < 5000 && depthAge < 5000) {
                 healthText = 'TÜM SİSTEM CANLI';
@@ -1082,6 +1141,16 @@
             document.getElementById('command-trade-age').textContent = `Son: ${this.ageLabel(telemetry.lastTradeAt)}`;
             document.getElementById('command-market-sync').textContent = `${telemetry.klineCount} / ${telemetry.depthCount}`;
             document.getElementById('command-market-age').textContent = `M ${this.ageLabel(telemetry.lastKlineAt)} · D ${this.ageLabel(telemetry.lastDepthAt)}`;
+            const qualityElement = document.getElementById('command-market-quality');
+            qualityElement.textContent = this.marketQualityLabel(quality.status);
+            qualityElement.className = `quality-state ${quality.status}`;
+            const qualityDetail = document.getElementById('command-market-quality-detail');
+            qualityDetail.textContent = quality.primaryReason
+                ? quality.primaryReason.message
+                : `Spread ${quality.spreadBps === null ? '—' : `${quality.spreadBps.toFixed(2)} bp`} · Derinlik ${this.compactUsd(quality.minDepthUsd)}`;
+            qualityDetail.title = quality.reasons.length
+                ? quality.reasons.map(reason => reason.message).join(' · ')
+                : qualityDetail.textContent;
             document.getElementById('command-strategy-state').textContent = `${Object.keys(this.activeStrategies).length} / ${Object.keys(this.strategies).length}`;
             document.getElementById('command-proposal-count').textContent = telemetry.strategyErrors
                 ? `${telemetry.proposalCount} teklif · ${telemetry.strategyErrors} hata`
@@ -1588,14 +1657,16 @@
                     asks: (data.a || []).map(([price, qty]) => [Number(price), Number(qty)])
                 };
                 const timestamp = Number(data.E) || Date.now();
+                const receivedAt = Date.now();
                 this.commandTelemetry.depthCount += 1;
-                this.commandTelemetry.lastDepthAt = Date.now();
+                this.commandTelemetry.lastDepthAt = receivedAt;
                 this.eventBus.emit('market.orderbook', {
                     symbol: this.currentSymbol,
                     orderBook: this.orderBook,
                     bestBid: this.orderBook.bids[0]?.[0] || null,
                     bestAsk: this.orderBook.asks[0]?.[0] || null,
-                    timestamp
+                    timestamp,
+                    receivedAt
                 });
                 return;
             }
@@ -1655,7 +1726,8 @@
                     symbol: this.currentSymbol,
                     timeframe: this.currentTimeframe,
                     trade,
-                    timestamp: trade.timestamp
+                    timestamp: trade.timestamp,
+                    receivedAt
                 });
             }
         }
@@ -1996,6 +2068,7 @@
             if (!signal) return;
             const diagnostics = signal.diagnostics || {};
             const conviction = diagnostics.conviction || {};
+            const signalQuality = diagnostics.marketQuality || null;
             const contributors = signal.details || [];
             const familyCount = diagnostics.independentFamilies || new Set(contributors.map(item => item.evidenceFamily)).size;
             const contributionTotal = contributors.reduce((sum, detail) => {
@@ -2010,6 +2083,7 @@
                 <article><span>Contributors / Katkı</span><strong>${contributors.length} strateji · ${contributionTotal.toFixed(2)} net</strong></article>
                 <article><span>Skor Farkı</span><strong>${Number(diagnostics.scoreLead || 0).toFixed(2)}</strong></article>
                 <article><span>Kararlılık</span><strong>${conviction.windows || 1} pencere · ${Math.round(conviction.elapsedMs || 0)} ms</strong></article>
+                <article><span>Piyasa Kalitesi</span><strong>${signalQuality ? `${this.marketQualityLabel(signalQuality.status)} · ${signalQuality.spreadBps ?? '—'} bp` : '—'}</strong></article>
                 <article><span>Rejim</span><strong>${this.escapeHtml(signal.regime || 'bilinmiyor')}</strong></article>
                 <article><span>Giriş</span><strong>${this.formatPrice(signal.price)}</strong></article>
                 <article><span>TP / SL</span><strong>${this.formatPrice(signal.tp)} / ${this.formatPrice(signal.sl)}</strong></article>
@@ -2177,7 +2251,7 @@
         }
 
         fillSettingsForm() {
-            const { params, cooldowns, signalSafety, learning } = this.settings;
+            const { params, cooldowns, signalSafety, learning, marketQuality } = this.settings;
             this.setInput('setting-threshold', this.settings.confluenceThreshold);
             this.setInput('setting-rsi', params.rsiPeriod);
             this.setInput('setting-atr', params.atrPeriod);
@@ -2201,6 +2275,16 @@
             this.setInput('setting-reversal-multiplier', signalSafety.reversalScoreMultiplier);
             document.getElementById('setting-active-lock').checked = signalSafety.preventSignalsWhileActive;
             document.getElementById('setting-reversal-close').checked = signalSafety.requireClosedCandleForReversal;
+            document.getElementById('setting-quality-enabled').checked = marketQuality.enabled;
+            document.getElementById('setting-quality-require-depth').checked = marketQuality.requireDepth;
+            this.setInput('setting-quality-trade-age', marketQuality.maxTradeAgeMs);
+            this.setInput('setting-quality-depth-age', marketQuality.maxDepthAgeMs);
+            this.setInput('setting-quality-transport-lag', marketQuality.maxTransportLagMs);
+            this.setInput('setting-quality-spread', marketQuality.maxSpreadBps);
+            this.setInput('setting-quality-depth-usd', marketQuality.minDepthUsd);
+            this.setInput('setting-quality-shock-bps', marketQuality.shockMoveBps);
+            this.setInput('setting-quality-shock-window', marketQuality.shockWindowMs);
+            this.setInput('setting-quality-shock-pause', marketQuality.shockPauseMs);
             this.setInput('setting-learning-min-samples', learning.minSamples);
             this.setInput('setting-learning-every', learning.optimizeEvery);
             this.setInput('setting-shadow-influence', learning.shadowInfluence);
@@ -2270,6 +2354,20 @@
                     shadowInfluence: number('setting-shadow-influence', 0.35, 0, 1),
                     maxShadowTrades: this.settings.learning.maxShadowTrades || 120
                 },
+                marketQuality: {
+                    enabled: document.getElementById('setting-quality-enabled').checked,
+                    requireDepth: document.getElementById('setting-quality-require-depth').checked,
+                    maxTradeAgeMs: number('setting-quality-trade-age', 3000, 500, 60000),
+                    maxDepthAgeMs: number('setting-quality-depth-age', 2000, 500, 60000),
+                    maxTransportLagMs: number('setting-quality-transport-lag', 2000, 250, 30000),
+                    maxSpreadBps: number('setting-quality-spread', 8, 0.01, 1000),
+                    minDepthUsd: number('setting-quality-depth-usd', 50000, 0, 1e12),
+                    criticalSpreadMultiplier: this.settings.marketQuality.criticalSpreadMultiplier || 2,
+                    criticalDepthRatio: this.settings.marketQuality.criticalDepthRatio ?? 0.5,
+                    shockMoveBps: number('setting-quality-shock-bps', 40, 1, 10000),
+                    shockWindowMs: number('setting-quality-shock-window', 3000, 250, 60000),
+                    shockPauseMs: number('setting-quality-shock-pause', 120000, 1000, 900000)
+                },
                 activeStrategies
             };
             this.saveData(STORAGE.settings, this.settings);
@@ -2289,6 +2387,7 @@
             this.confluenceEngine.reset();
             this.updateActiveStrategies();
             this.fillSettingsForm();
+            this.eventBus.emit('settings.changed', { settings: this.settings, timestamp: Date.now() });
             this.renderSafetyChips();
             this.renderLearning();
             this.notify('Varsayılan güvenli ayarlar yüklendi.', 'info');
@@ -2302,7 +2401,8 @@
                 `${safety.minScoreLead} puan skor farkı`,
                 `${Math.round(safety.oppositeSignalLockMs / 1000)} sn ters kilit`,
                 `+${safety.reverseHysteresisPoints} ters histerezis`,
-                `${safety.reversalAtrInvalidation} ATR geçersizlik`
+                `${safety.reversalAtrInvalidation} ATR geçersizlik`,
+                this.settings.marketQuality.enabled ? 'piyasa kalite kilidi' : 'kalite kilidi kapalı'
             ].map(text => `<span>${this.escapeHtml(text)}</span>`).join('');
         }
 
@@ -2468,7 +2568,7 @@
         try {
             window.app = new TradingScannerApp();
             if ('serviceWorker' in navigator && window.isSecureContext) {
-                navigator.serviceWorker.register('./sw.js?v=7').catch(error => {
+                navigator.serviceWorker.register('./sw.js?v=8').catch(error => {
                     console.warn('Çevrimdışı uygulama kabuğu kaydedilemedi:', error);
                 });
             }

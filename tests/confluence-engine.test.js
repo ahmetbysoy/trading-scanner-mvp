@@ -13,6 +13,7 @@ function createHarness(overrides = {}) {
         marketData: { price: 60_000 },
         signals: [],
         eventBus: overrides.eventBus || null,
+        marketQualityEngine: overrides.marketQualityEngine || null,
         strategies: {
             momentum: { displayName: 'Momentum' },
             orderFlow: { displayName: 'Order Flow' },
@@ -114,6 +115,56 @@ test('teklif kabulü ve zamanlanmış değerlendirme olay veri yoluna yayınlan�
     assert.equal(events[1].event, 'confluence.evaluated');
     assert.equal(events[1].payload.trigger, 'scheduled');
     assert.equal(events[1].payload.status, 'below-threshold');
+});
+
+test('piyasa kalite hard gate sağlıksız veride confluence kararını bloklar', () => {
+    const h = createHarness({
+        marketQualityEngine: {
+            getSnapshot() {
+                return {
+                    enabled: true,
+                    status: 'stale',
+                    blockNewSignals: true,
+                    thresholdPenalty: 0,
+                    primaryReason: { code: 'stale-depth', message: 'Depth verisi bayat.' }
+                };
+            }
+        }
+    });
+
+    h.engine.propose('momentum', 'buy', 'momentum', 4);
+    h.engine.propose('orderFlow', 'buy', 'akış', 4);
+    const result = h.engine.evaluateNow();
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.reason, 'market-quality-stale-depth');
+    assert.equal(result.marketQuality.status, 'stale');
+    assert.equal(h.bot.signals.length, 0);
+});
+
+test('degraded piyasa kalitesi confluence eşiğini kontrollü yükseltir', () => {
+    const h = createHarness({
+        marketQualityEngine: {
+            getSnapshot() {
+                return {
+                    enabled: true,
+                    status: 'degraded',
+                    blockNewSignals: false,
+                    thresholdPenalty: 2,
+                    primaryReason: { code: 'wide-spread', message: 'Spread yüksek.' }
+                };
+            }
+        }
+    });
+
+    h.engine.propose('momentum', 'buy', 'momentum', 2);
+    h.engine.propose('orderFlow', 'buy', 'akış', 2);
+    const result = h.engine.evaluateNow();
+
+    assert.equal(result.status, 'below-threshold');
+    assert.equal(result.baseThreshold, 3);
+    assert.equal(result.threshold, 5);
+    assert.equal(result.marketQuality.status, 'degraded');
 });
 
 test('tek stratejiden gelen skor 5, bağımsız teyit olmadan sinyal sayılmaz', () => {

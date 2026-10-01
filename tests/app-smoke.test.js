@@ -168,6 +168,7 @@ function runScript(context, relativePath) {
 test('uygulama null ticker verisiyle hatasız açılır ve adaptif paneli oluşturur', async () => {
     const context = createBrowserContext();
     runScript(context, 'src/adaptive-learning.js');
+    runScript(context, 'src/market-quality.js');
     runScript(context, 'src/confluence-engine.js');
     runScript(context, 'src/app.js');
 
@@ -201,6 +202,7 @@ test('uygulama null ticker verisiyle hatasız açılır ve adaptif paneli oluşt
 test('mobil alt menü ekran değiştirir, görünümü saklar ve ayar sayfasını açar', async () => {
     const context = createBrowserContext();
     runScript(context, 'src/adaptive-learning.js');
+    runScript(context, 'src/market-quality.js');
     runScript(context, 'src/confluence-engine.js');
     runScript(context, 'src/app.js');
 

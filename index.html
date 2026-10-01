@@ -16,11 +16,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=11">
+    <link rel="stylesheet" href="./styles.css?v=12">
     <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script defer src="./src/adaptive-learning.js?v=11"></script>
-    <script defer src="./src/confluence-engine.js?v=11"></script>
-    <script defer src="./src/app.js?v=11"></script>
+    <script defer src="./src/adaptive-learning.js?v=12"></script>
+    <script defer src="./src/market-quality.js?v=12"></script>
+    <script defer src="./src/confluence-engine.js?v=12"></script>
+    <script defer src="./src/app.js?v=12"></script>
 </head>
 <body data-mobile-view="home">
     <noscript>Bu uygulamayı kullanmak için JavaScript etkin olmalıdır.</noscript>
@@ -119,6 +120,11 @@
                         <span>Mum / Derinlik</span>
                         <strong id="command-market-sync">0 / 0</strong>
                         <small id="command-market-age">Bekleniyor</small>
+                    </article>
+                    <article>
+                        <span>Piyasa kalitesi</span>
+                        <strong id="command-market-quality" class="quality-state stopped">DURDURULDU</strong>
+                        <small id="command-market-quality-detail">Veri bekleniyor</small>
                     </article>
                     <article>
                         <span>Strateji motoru</span>
@@ -308,12 +314,13 @@
                     <span class="eyebrow">YAPILANDIRMA</span>
                     <h2>Ayarlar ve Stratejiler</h2>
                 </div>
-                <button id="close-settings-btn" class="icon-btn" value="cancel" type="submit" aria-label="Ayarları kapat">×</button>
+                <button id="close-settings-btn" class="icon-btn" value="cancel" type="submit" formnovalidate aria-label="Ayarları kapat">×</button>
             </div>
 
             <nav class="settings-section-nav" aria-label="Ayar bölümleri">
                 <button type="button" data-settings-target="settings-basic">Temel</button>
                 <button type="button" data-settings-target="settings-safety">Güvenlik</button>
+                <button type="button" data-settings-target="settings-quality">Piyasa</button>
                 <button type="button" data-settings-target="settings-learning">Öğrenme</button>
                 <button type="button" data-settings-target="settings-cooldowns">Cooldown</button>
                 <button type="button" data-settings-target="settings-strategies">Stratejiler</button>
@@ -358,6 +365,28 @@
                     </label>
                 </fieldset>
 
+                <fieldset id="settings-quality" class="quality-fieldset">
+                    <legend>Piyasa Kalite Geçidi</legend>
+                    <div class="settings-grid">
+                        <label class="field"><span>Maksimum Trade Yaşı (ms)</span><input id="setting-quality-trade-age" type="number" min="500" max="60000" step="100"></label>
+                        <label class="field"><span>Maksimum Depth Yaşı (ms)</span><input id="setting-quality-depth-age" type="number" min="500" max="60000" step="100"></label>
+                        <label class="field"><span>Maksimum Transport Gecikmesi (ms)</span><input id="setting-quality-transport-lag" type="number" min="250" max="30000" step="250"></label>
+                        <label class="field"><span>Maksimum Spread (bp)</span><input id="setting-quality-spread" type="number" min="0.1" max="1000" step="0.1"></label>
+                        <label class="field"><span>Minimum Taraf Derinliği (USD)</span><input id="setting-quality-depth-usd" type="number" min="0" max="1000000000000" step="1000"></label>
+                        <label class="field"><span>Şok Hareketi (bp)</span><input id="setting-quality-shock-bps" type="number" min="1" max="10000" step="1"></label>
+                        <label class="field"><span>Şok Penceresi (ms)</span><input id="setting-quality-shock-window" type="number" min="250" max="60000" step="250"></label>
+                        <label class="field"><span>Şok Kilidi (ms)</span><input id="setting-quality-shock-pause" type="number" min="1000" max="900000" step="1000"></label>
+                    </div>
+                    <label class="toggle-row">
+                        <span><b>Piyasa kalite kilidi</b><small>Bayat/geçersiz veride veya fiyat şokunda yeni sinyal üretimini durdur.</small></span>
+                        <input id="setting-quality-enabled" type="checkbox">
+                    </label>
+                    <label class="toggle-row">
+                        <span><b>Depth zorunluluğu</b><small>Taze ve geçerli Futures depth verisi olmadan yeni sinyal üretme.</small></span>
+                        <input id="setting-quality-require-depth" type="checkbox">
+                    </label>
+                </fieldset>
+
                 <fieldset id="settings-learning" class="learning-fieldset">
                     <legend>Adaptif Öğrenme</legend>
                     <div class="settings-grid">
@@ -391,7 +420,7 @@
             <div class="dialog-footer">
                 <button id="reset-settings-btn" class="btn btn-danger" type="button"><span class="desktop-reset-label">Varsayılana Dön</span><span class="mobile-reset-label">Sıfırla</span></button>
                 <div class="dialog-footer-right">
-                    <button class="btn btn-ghost" value="cancel" type="submit">Vazgeç</button>
+                    <button class="btn btn-ghost" value="cancel" type="submit" formnovalidate>Vazgeç</button>
                     <button id="save-settings-btn" class="btn btn-primary" value="default" type="submit">Kaydet</button>
                 </div>
             </div>
